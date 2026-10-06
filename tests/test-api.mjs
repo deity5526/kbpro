@@ -778,6 +778,8 @@ async function runSuite() {
     eq(unknown.chatModel, '', '未知兼容接口不编造模型名');
     eq(unknown.modelMissing, true, '未指定模型时标记 modelMissing');
     eq(unknown.embedModel, '', '未知兼容接口不编造嵌入模型');
+    const slash = resolveAiConfig({ ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com/v1/', ai_model: 'deepseek-chat', ai_key_enc: keyEnc });
+    eq(slash.baseUrl, 'https://api.deepseek.com/v1', 'Base URL 尾部斜杠被清理（避免 //models 404）');
     // 「自动」+ 仅填 Key（无 baseUrl）不应把 key 当作可用
     const autoKeyOnly = resolveAiConfig({ ai_provider: 'auto', ai_base_url: '', ai_model: '', ai_key_enc: keyEnc });
     check(autoKeyOnly.provider !== 'openai', '只有 Key 没有 Base URL 时不会启用大模型', autoKeyOnly.provider);

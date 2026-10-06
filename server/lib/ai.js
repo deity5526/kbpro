@@ -73,9 +73,13 @@ export function resolveAiConfig(userRow) {
   if (provider === 'openai' && !apiKey) provider = 'local';
 
   if (!baseUrl && provider === 'openai') baseUrl = 'https://api.openai.com/v1';
-  if (baseUrl && !/\/v1$|\/chat\/completions$/.test(baseUrl)) {
-    // 允许用户填 https://host 或 https://host/v1
-    if (!/\/v\d+/.test(baseUrl)) baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
+  if (baseUrl) {
+    // 统一去掉尾部斜杠，避免探测(/models)与对话(/chat/completions)拼出 "//" 导致 404
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    if (!/\/v\d+$|\/chat\/completions$/.test(baseUrl)) {
+      // 允许用户填 https://host 或 https://host/v1
+      baseUrl = `${baseUrl}/v1`;
+    }
   }
 
   const resolvedModel = chatModel || defaultChatModel(provider, baseUrl);

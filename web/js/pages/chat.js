@@ -1038,6 +1038,14 @@ async function runAsk(question) {
     asstMsg.content = text;
   }
 
+  // 配置了大模型但调用失败时会回退本地引擎：必须如实展示，避免"用了大模型却没反应"
+  if (result && result.error) {
+    asstMsg.error = true;
+    asstMsg.errorMsg = `大模型调用失败：${result.error}`;
+    notify.warn(`大模型调用失败，已回退内置本地引擎：${result.error}`);
+    loadAiStatus();
+  }
+
   if (!stopped && streamError) {
     asstMsg.error = true;
     asstMsg.errorMsg = streamError;

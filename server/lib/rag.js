@@ -470,6 +470,7 @@ export async function askKnowledgeBase(p) {
     provider: result.provider,
     model: result.model,
     fallback: !!result.fallback,
+    error: result.error || '',
     usage: result.usage || {},
     contexts,
     ms: Date.now() - started
