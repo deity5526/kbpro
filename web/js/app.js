@@ -4,7 +4,8 @@
 import api, { ApiError } from './api.js';
 import {
   qs, qsa, el, on, applyIcons, icon, notify, toast, modal, confirmDialog, promptDialog,
-  dropdown, closeAllDropdowns, copyText, emptyState, esc, timeAgo, formatBytes, initials, colorFor, debounce
+  dropdown, closeAllDropdowns, copyText, emptyState, esc, timeAgo, formatBytes, initials, colorFor, debounce,
+  pickFiles
 } from './ui.js';
 import {
   getState, setState, subscribe, currentWorkspace, canWrite, canManage, isAdmin,
@@ -467,6 +468,15 @@ function bindShellEvents() {
   // 上传
   qs('#upload-trigger').addEventListener('click', () => document.dispatchEvent(new CustomEvent('kbpro:upload-request')));
 
+  // 全局上传入口：顶栏按钮 / 快捷键 / 命令面板 / 首页快捷操作均只派发事件，
+  // 由应用壳统一处理，避免离开「文件库」页面后上传无响应。
+  document.addEventListener('kbpro:upload-request', () => { void requestGlobalUpload(); });
+
+  // 退出登录前主动断开 SSE，避免长连接拖慢页面卸载
+  document.addEventListener('kbpro:logout', () => {
+    try { eventSource?.close(); eventSource = null; } catch { /* ignore */ }
+  });
+
   // 通知
   qs('#notify-trigger').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -487,6 +497,20 @@ function bindShellEvents() {
   });
 
   bindDropZone();
+}
+
+/** 全局上传：任意页面均可触发，落点取当前知识库（及文件库当前文件夹） */
+async function requestGlobalUpload() {
+  if (!getState().user) { notify.warn('请先登录'); return; }
+  if (!currentWorkspace()) { notify.warn('请先创建一个知识库'); return; }
+  if (!canWrite()) { notify.warn('当前知识库没有写入权限'); return; }
+  let files;
+  try { files = await pickFiles({ multiple: true }); } catch { files = []; }
+  if (!files || !files.length) return;
+  const folderId = window.__kbproDropFolder || null;
+  const result = await uploadFiles(files, { folderId });
+  document.dispatchEvent(new CustomEvent('kbpro:files-changed'));
+  if (result?.files?.length) debouncedRefreshStats();
 }
 
 /* ------------------------------------------------------------------ 拖拽上传 */

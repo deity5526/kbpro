@@ -16,6 +16,9 @@ export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 export const TMP_DIR = path.join(DATA_DIR, 'tmp');
 export const EXPORT_DIR = path.join(DATA_DIR, 'exports');
 export const DB_PATH = path.join(DATA_DIR, 'kbpro.sqlite');
+/** 项目根目录下的可提交配置文件（大模型接入等），优先于默认值、低于运行时 data/config.json */
+export const ROOT_CONFIG_PATH = path.join(ROOT, 'config.json');
+/** 运行时配置（由「系统管理 → 实例设置」写入），优先级最高 */
 export const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 export const KEY_PATH = path.join(DATA_DIR, '.master.key');
 
@@ -65,18 +68,19 @@ export function ensureDirs() {
 
 let cachedConfig = null;
 
-/** 读取合并后的配置（默认值 <- data/config.json <- 环境变量） */
+/** 读取合并后的配置（默认值 <- config.json <- data/config.json <- 环境变量） */
 export function loadConfig({ reload = false } = {}) {
   if (cachedConfig && !reload) return cachedConfig;
-  let fileCfg = {};
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      fileCfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    }
-  } catch {
-    fileCfg = {};
-  }
-  const merged = deepMerge(structuredClone(DEFAULTS), fileCfg);
+  const readJson = (p) => {
+    try {
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch { /* 忽略非法 JSON */ }
+    return {};
+  };
+  const rootCfg = readJson(ROOT_CONFIG_PATH);
+  const fileCfg = readJson(CONFIG_PATH);
+  const merged = deepMerge(deepMerge(structuredClone(DEFAULTS), rootCfg), fileCfg);
+  if (process.env.KBPRO_HOST) merged.host = process.env.KBPRO_HOST;
   if (process.env.KBPRO_PORT) merged.port = Number(process.env.KBPRO_PORT);
   cachedConfig = merged;
   return merged;

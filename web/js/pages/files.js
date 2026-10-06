@@ -519,6 +519,7 @@ function selectFolder(ctx, id) {
   state.folderId = id;
   state.filter = 'all';
   state.selected.clear();
+  window.__kbproDropFolder = state.folderId === 'all' || state.folderId === 'root' ? null : state.folderId;
   updateFilterLabel();
   renderTree(ctx);
   loadFiles(ctx);
@@ -573,9 +574,9 @@ function bindToolbar(container, ctx) {
   updateSortLabel();
   updateFilterLabel();
 
-  // 全局事件：新建文件夹 / 上传
+  // 全局事件：新建文件夹 / 文件变化
+  // 上传事件由应用壳统一处理（见 app.js requestGlobalUpload），此处不再重复监听。
   const onNewFolder = () => createFolderDialog(ctx);
-  const onUploadReq = () => requestUpload(ctx);
   const onFilesChanged = () => loadFiles(ctx);
   const onRealtime = (e) => {
     const p = e.detail;
@@ -583,11 +584,9 @@ function bindToolbar(container, ctx) {
     if (['file.indexed', 'file.failed'].includes(p.type)) loadFiles(ctx);
   };
   document.addEventListener('kbpro:new-folder', onNewFolder);
-  document.addEventListener('kbpro:upload-request', onUploadReq);
   document.addEventListener('kbpro:files-changed', onFilesChanged);
   document.addEventListener('kbpro:realtime', onRealtime);
   cleanup.push(() => document.removeEventListener('kbpro:new-folder', onNewFolder));
-  cleanup.push(() => document.removeEventListener('kbpro:upload-request', onUploadReq));
   cleanup.push(() => document.removeEventListener('kbpro:files-changed', onFilesChanged));
   cleanup.push(() => document.removeEventListener('kbpro:realtime', onRealtime));
 

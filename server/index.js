@@ -195,6 +195,9 @@ async function handleRequest(req, res) {
 
 /* ------------------------------------------------------------------ 服务器 */
 
+// 记录活动连接：SSE / 长连接不结束会导致 server.close() 永久等待
+const liveSockets = new Set();
+
 const server = http.createServer((req, res) => {
   const started = Date.now();
   res.on('finish', () => {
@@ -208,6 +211,11 @@ const server = http.createServer((req, res) => {
     console.error('[kbpro] 未捕获异常', err);
     if (!res.writableEnded) sendError(res, 500, '服务器内部错误');
   });
+});
+
+server.on('connection', (socket) => {
+  liveSockets.add(socket);
+  socket.on('close', () => liveSockets.delete(socket));
 });
 
 server.headersTimeout = 0;
@@ -275,7 +283,29 @@ export async function start({ port = cfg.port, host = cfg.host, silent = false }
 }
 
 export async function stop() {
-  await new Promise((resolve) => server.close(() => resolve()));
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+
+    server.close(finish);
+
+    // 主动断开 keep-alive / SSE 等长连接，避免 close() 回调迟迟不触发
+    if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+    if (typeof server.closeAllConnections === 'function') {
+      server.closeAllConnections();
+    } else {
+      for (const socket of liveSockets) {
+        try { socket.destroy(); } catch { /* ignore */ }
+      }
+    }
+
+    // 兜底：无论连接状态如何，最多等待 1.5s 后强制结束
+    const timer = setTimeout(() => {
+      for (const socket of liveSockets) { try { socket.destroy(); } catch { /* ignore */ } }
+      finish();
+    }, 1500);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
   closeDb();
 }
 

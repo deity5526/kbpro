@@ -1,0 +1,31 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+
+  "maxUploadBytes": 209715200,
+  "maxExtractChars": 4194304,
+  "searchLimit": 50,
+  "ragTopK": 8,
+  "ragChunkSize": 900,
+  "ragChunkOverlap": 180,
+  "allowSignup": true,
+  "sessionDays": 30,
+
+  "ai": {
+    "provider": "auto",
+    "baseUrl": "",
+    "apiKey": "",
+    "chatModel": "",
+    "embedModel": "",
+    "ollamaUrl": "http://127.0.0.1:11434",
+    "temperature": 0.2,
+    "maxTokens": 1600,
+    "timeoutMs": 120000
+  },
+
+  "bootstrap": {
+    "email": "admin@kbpro.local",
+    "password": "admin12345",
+    "name": "知识库管理员"
+  }
+}

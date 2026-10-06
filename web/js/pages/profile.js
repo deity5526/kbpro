@@ -451,6 +451,7 @@ function bindSecurity(container, ctx) {
       notify.error(err?.message || '退出失败');
       return;
     }
+    document.dispatchEvent(new CustomEvent('kbpro:logout'));
     location.reload();
   }));
 

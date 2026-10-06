@@ -99,7 +99,7 @@ KBPRO_HOST=0.0.0.0 KBPRO_PORT=8787 node server/index.js
 
 ## 功能地图
 
-### 基础版（Day 1）
+### 基础功能
 
 | 需求 | 实现 |
 |---|---|
@@ -113,7 +113,7 @@ KBPRO_HOST=0.0.0.0 KBPRO_PORT=8787 node server/index.js
 | 笔记自动保存与状态提示 | 900ms 防抖自动保存，保存状态点（编辑中/已保存/失败） |
 | 列表 hover / 选中高亮 | 行级 hover 高亮、多选状态、全选与批量操作条 |
 
-### 进阶版（Day 2）
+### 进阶功能
 
 | 需求 | 实现 |
 |---|---|
@@ -128,7 +128,7 @@ KBPRO_HOST=0.0.0.0 KBPRO_PORT=8787 node server/index.js
 | 页面过渡与展开收起动画 | `pageIn` / `modalIn` / `drawerIn` / 树形展开折叠动画 |
 | 多端适配 | 3 档响应式断点，移动端抽屉式导航与列表 |
 
-### 商用版（Day 3）
+### 商用功能
 
 | 需求 | 实现 |
 |---|---|
@@ -220,7 +220,34 @@ BM25 打分直接用 SQL 取倒排链，无需启动时重建内存索引，进�
 
 ## 配置项
 
-编辑 `data/config.json`，或在「系统管理 → 实例设置」中修改，或使用环境变量。
+配置优先级（后者覆盖前者）：**内置默认值 → 项目根目录 `config.json` → 运行时 `data/config.json` → 环境变量**。
+
+### 项目根目录 `config.json`（推荐，可直接编辑）
+
+仓库根目录自带 `config.json`，把常用配置与**大模型接入**集中在这里，编辑后重启服务生效：
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "ai": {
+    "provider": "openai",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "sk-xxxxxxxx",
+    "chatModel": "deepseek-chat",
+    "embedModel": "text-embedding-3-small",
+    "ollamaUrl": "http://127.0.0.1:11434"
+  }
+}
+```
+
+- `provider`：`auto`（自动探测）｜`ollama`（本地模型）｜`openai`（任意 OpenAI 兼容接口）｜`local`（内置抽取式引擎）。
+- 留空 `apiKey` 时不会启用远程模型，自动回退到内置本地引擎，功能仍然可用。
+- 也可在「个人中心 → AI 引擎」中按用户单独配置（密钥以 AES-256-GCM 加密存入数据库，优先级高于全局配置）。
+
+> ⚠️ `config.json` 会被 Git 跟踪；**请勿把真实 API Key 提交到公开仓库**。生产环境建议改用环境变量（见下表）或在「系统管理 → 实例设置」中配置运行时 `data/config.json`。
+
+### 运行时配置 / 环境变量
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
