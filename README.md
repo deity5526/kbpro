@@ -315,6 +315,18 @@ ollama pull nomic-embed-text    # 可选：嵌入模型
 { "ai": { "answerWithoutContext": false } }
 ```
 
+### 排错：为什么「没看到请求大模型」
+
+上游请求由**服务端进程**发出，浏览器 DevTools 只能看到对 `127.0.0.1:8787` 的请求，看不到 `api.deepseek.com`。要看真实上游调用，观察**服务端终端日志**：
+
+```
+[kbpro:ai] POST https://api.deepseek.com/v1/chat/completions model=deepseek-chat stream=false key=set
+[kbpro:ai] ← 200 https://api.deepseek.com/v1/chat/completions
+```
+
+- 用 `KBPRO_AI_DEBUG=0` 可关闭（`KBPRO_QUIET=1` 也会静默）。
+- 常见错误：模型名写错（DeepSeek 只有 `deepseek-chat` / `deepseek-reasoner`）→ 日志会显示 `← 400 ...`。
+
 ---
 
 ## 示例数据

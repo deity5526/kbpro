@@ -11,6 +11,17 @@ import * as local from './localai.js';
 
 const probeCache = new Map();
 
+/**
+ * 上游大模型请求日志。
+ * 默认打屏（KBPRO_QUIET=1 时静默），便于确认是否真的请求了 DeepSeek 等接口。
+ * 需要绝对安静可用 KBPRO_AI_DEBUG=0 关闭。
+ */
+function aiLog(...args) {
+  if (process.env.KBPRO_AI_DEBUG === '0') return;
+  if (process.env.KBPRO_QUIET === '1') return;
+  console.log('[kbpro:ai]', ...args);
+}
+
 /* ------------------------------------------------------------------ 配置解析 */
 
 /**
@@ -194,10 +205,12 @@ export async function probeAiConfig(conf) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
+    aiLog(`GET ${conf.baseUrl}/models（探测）`);
     const res = await fetch(`${conf.baseUrl}/models`, {
       headers: authHeaders(conf), signal: controller.signal
     });
     clearTimeout(timer);
+    aiLog(`← ${res.status} ${conf.baseUrl}/models`);
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       const models = (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);
@@ -302,6 +315,7 @@ async function ollamaChat({ conf, model, messages, stream, onToken, onDelta, sig
   const timer = setTimeout(() => controller.abort(), conf.timeoutMs);
   if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
 
+  aiLog(`POST ${url} model=${model} stream=${!!stream}（Ollama）`);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -373,6 +387,7 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
   const timer = setTimeout(() => controller.abort(), conf.timeoutMs);
   if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
 
+  aiLog(`POST ${url} model=${model} stream=${!!stream} key=${conf.apiKey ? 'set' : 'empty'}`);
   const res = await fetch(url, {
     method: 'POST',
     headers: authHeaders(conf),
@@ -389,8 +404,10 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
   if (!res.ok) {
     clearTimeout(timer);
     const text = await res.text().catch(() => '');
+    aiLog(`← ${res.status} ${text.slice(0, 200)}`);
     throw new Error(`接口 HTTP ${res.status} ${text.slice(0, 200)}`);
   }
+  aiLog(`← ${res.status} ${url}`);
 
   if (!stream) {
     const data = await res.json();
@@ -443,6 +460,7 @@ export async function embedTexts(texts, userRow) {
   const conf = resolveAiConfig(userRow);
   const list = texts.map((t) => String(t ?? '').slice(0, 8000));
   if (!list.length) return { vectors: [], model: '', provider: 'local' };
+  aiLog(`embedTexts provider=${conf.provider} embedModel=${conf.embedModel || '（无，使用内置哈希向量）'}`);
 
   if (conf.provider === 'ollama' && conf.embedModel) {
     try {
