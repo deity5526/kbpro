@@ -50,7 +50,9 @@ export const DEFAULTS = {
     ollamaUrl: process.env.KBPRO_OLLAMA_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
     temperature: 0.2,
     maxTokens: 1600,
-    timeoutMs: 120000
+    timeoutMs: 120000,
+    /** 知识库未检索到依据时，是否仍用大模型以通用知识作答（默认开启） */
+    answerWithoutContext: true
   },
   /** 默认演示账号，仅在数据库为空时创建 */
   bootstrap: {

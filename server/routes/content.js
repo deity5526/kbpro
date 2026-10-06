@@ -275,6 +275,66 @@ export function registerContentRoutes(router) {
     });
   });
 
+  /** 新建纯文本文档（Markdown / TXT 等），供在线新建与批量导入使用 */
+  router.post('/api/files/text', async (req, res, ctx) => {
+    const user = ctx.requireUser();
+    const body = ctx.body || {};
+    const workspaceId = str(body.workspaceId, '', 80);
+    if (!workspaceId) throw httpError(400, '缺少 workspaceId');
+    requireWorkspace(user.id, workspaceId, 'edit');
+
+    let content = String(body.content ?? body.text ?? '');
+    if (!content.trim()) throw httpError(400, '内容不能为空');
+    if (content.length > 4 * 1024 * 1024) content = content.slice(0, 4 * 1024 * 1024);
+
+    let folderId = body.folderId ? str(body.folderId, '', 80) : null;
+    if (folderId) {
+      const folder = get(`SELECT id FROM folders WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, folderId, workspaceId);
+      if (!folder) folderId = null;
+    }
+    const encrypt = bool(body.encrypt, false);
+    const extraTags = normalizeTags(body.tags || []);
+    let name = safeFileName(str(body.name, '', 200).trim() || '未命名.md');
+    const { base, ext: rawExt } = splitExt(name);
+    const ext = (rawExt || 'md').toLowerCase();
+
+    // 同名去重
+    let n = 1;
+    while (get(`SELECT id FROM files WHERE workspace_id=? AND deleted_at IS NULL AND name=? AND IFNULL(folder_id,'')=IFNULL(?,'')`,
+      workspaceId, name, folderId ?? null)) {
+      n++;
+      name = `${base} (${n}).${ext}`;
+    }
+
+    const fileId = randomId('file');
+    const storageKey = relativeStoragePath(workspaceId, fileId, ext);
+    const tmpPath = path.join(TMP_DIR, `txt_${Date.now().toString(36)}_${randomId('')}`);
+    await fsp.writeFile(tmpPath, content, 'utf8');
+    const saved = await persistUpload(tmpPath, storageKey, { encrypt });
+
+    const now = nowIso();
+    const mime = guessMime(ext);
+    insert('files', {
+      id: fileId, workspace_id: workspaceId, folder_id: folderId, name, ext, mime,
+      size: saved.size, storage_key: storageKey, checksum: saved.checksum || sha256(content),
+      encrypted: encrypt ? 1 : 0, private_flag: encrypt ? 1 : 0,
+      acl_level: encrypt ? 'private' : 'inherit',
+      tags: JSON.stringify(extraTags), starred: 0, pinned: 0,
+      created_by: user.id, updated_by: user.id, created_at: now, updated_at: now,
+      version: 1, preview_kind: detectPreviewKind(ext, mime)
+    });
+    insert('file_text', {
+      file_id: fileId, workspace_id: workspaceId, text: '', html: '', status: 'pending',
+      error: '', page_count: 0, chars: 0, meta: '{}', engine: '', extract_ms: 0, updated_at: now
+    });
+    if (extraTags.length) syncTags(workspaceId, 'file', fileId, extraTags, user.id);
+    run(`UPDATE users SET storage_used = storage_used + ? WHERE id=?`, saved.size, user.id);
+    enqueueIndex(fileId, { force: true, priority: true });
+    publishWorkspace(workspaceId, { type: 'files.uploaded', count: 1, ids: [fileId] });
+    audit({ workspaceId, userId: user.id, userName: user.name, action: 'file.create', resourceType: 'file', resourceId: fileId, resourceName: name, detail: formatBytes(saved.size), ip: clientIp(req) });
+    sendJson(res, 201, { ok: true, file: serializeFile(fileRow(fileId)) });
+  });
+
   /** 列出文件 */
   router.get('/api/files', async (req, res, ctx) => {
     const user = ctx.requireUser();

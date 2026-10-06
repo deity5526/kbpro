@@ -302,6 +302,35 @@ ollama pull nomic-embed-text    # 可选：嵌入模型
 无需任何配置。摘要与问答由 TextRank 句子图排序 + 词频加权的抽取式算法产出，
 结果**完全来自你的原文**，不会编造；代价是不做改写润色，措辞即原文措辞。
 
+### 无依据时的行为
+
+当知识库中检索不到与问题相关的资料时：
+
+- **已接入大模型**（Ollama / OpenAI 兼容）且 `ai.answerWithoutContext` 为 `true`（默认）：仍会调用大模型，以通用知识作答，并在回答开头声明「以下为通用回答，未引用知识库资料」。
+- 未接入大模型（内置本地引擎），或把该项设为 `false`：返回固定的「暂无依据」提示，不调用模型。
+
+在 `config.json` 的 `ai` 段中配置：
+
+```json
+{ "ai": { "answerWithoutContext": false } }
+```
+
+---
+
+## 示例数据
+
+想快速体验检索与问答，可在服务启动后另开终端导入一批示例文档（Markdown）：
+
+```bash
+node server/index.js          # 终端 1：启动服务
+node scripts/seed-demo.mjs    # 终端 2：导入示例文档
+# 或
+npm run seed
+```
+
+会导入到默认个人知识库；可用环境变量 `KBPRO_SEED_WORKSPACE` 指定目标知识库，
+`KBPRO_SEED_EMAIL` / `KBPRO_SEED_PASSWORD` 指定登录账号。
+
 ---
 
 ## 测试与验证

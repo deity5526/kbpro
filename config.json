@@ -20,7 +20,8 @@
     "ollamaUrl": "http://127.0.0.1:11434",
     "temperature": 0.2,
     "maxTokens": 1600,
-    "timeoutMs": 120000
+    "timeoutMs": 120000,
+    "answerWithoutContext": true
   },
 
   "bootstrap": {

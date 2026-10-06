@@ -284,6 +284,13 @@ async function runSuite() {
     const list = await json('GET', `/api/files?workspaceId=${personalWs}&folderId=${folderA}`);
     eq(list.status, 200, '文件列表可用');
     check(list.data.total >= 2, '列表中包含上传的文件', list.data.total);
+
+    // 新建纯文本文档接口
+    const made = await json('POST', '/api/files/text', {
+      workspaceId: personalWs, name: '在线新建.md', content: '# 在线新建\n\n这是通过接口创建的文本文档。'
+    });
+    eq(made.status, 201, '新建文本文档成功');
+    eq(made.data.file?.name, '在线新建.md', '返回新建文件信息');
   }
 
   /* ============================ 检索 ============================ */

@@ -13,7 +13,8 @@
     "dev": "node --watch server/index.js",
     "test": "node tests/run-all.mjs",
     "test:api": "node tests/test-api.mjs",
-    "test:full": "node tests/run-all.mjs --full"
+    "test:full": "node tests/run-all.mjs --full",
+    "seed": "node scripts/seed-demo.mjs"
   },
   "dependencies": {},
   "keywords": [
