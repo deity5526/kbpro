@@ -52,7 +52,11 @@ export const DEFAULTS = {
     maxTokens: 1600,
     timeoutMs: 120000,
     /** 知识库未检索到依据时，是否仍用大模型以通用知识作答（默认开启） */
-    answerWithoutContext: true
+    answerWithoutContext: true,
+    /** 思考型模型（如 deepseek-flash / deepseek-reasoner）：true 始终开，false 从不，null 自动 */
+    thinking: null,
+    /** 思考强度：low | medium | high（留空则思考型模型默认 high） */
+    reasoningEffort: ''
   },
   /** 默认演示账号，仅在数据库为空时创建 */
   bootstrap: {

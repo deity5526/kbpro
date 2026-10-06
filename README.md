@@ -315,6 +315,24 @@ ollama pull nomic-embed-text    # 可选：嵌入模型
 { "ai": { "answerWithoutContext": false } }
 ```
 
+### 思考型模型（DeepSeek deepseek-flash / deepseek-reasoner）
+
+KBPRO 会按官方协议自动携带思考参数。当 Base URL 含 `deepseek` 且模型名为
+`deepseek-flash` / `deepseek-reasoner` 时，请求体自动附加：
+
+```json
+{ "thinking": { "type": "enabled" }, "reasoning_effort": "high" }
+```
+
+也可在 `config.json` 的 `ai` 段显式控制（对其它兼容接口同样适用）：
+
+```json
+{ "ai": { "thinking": true, "reasoningEffort": "high" } }
+```
+
+- `thinking`：`true` 始终开启、`false` 从不、`null`/缺省为自动（仅 DeepSeek 思考型模型）。
+- `reasoningEffort`：`low` | `medium` | `high`。
+
 ### 排错：为什么「没看到请求大模型」
 
 上游请求由**服务端进程**发出，浏览器 DevTools 只能看到对 `127.0.0.1:8787` 的请求，看不到 `api.deepseek.com`。要看真实上游调用，观察**服务端终端日志**：

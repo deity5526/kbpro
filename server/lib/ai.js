@@ -105,7 +105,10 @@ export function resolveAiConfig(userRow) {
     ollamaUrl,
     temperature: Number(base.temperature ?? 0.2),
     maxTokens: Number(base.maxTokens ?? 1600),
-    timeoutMs: Number(base.timeoutMs ?? 120000)
+    timeoutMs: Number(base.timeoutMs ?? 120000),
+    // true=始终开启思考；false=从不；null/未设=自动（DeepSeek 思考型模型默认开启）
+    thinking: base.thinking === true ? true : (base.thinking === false ? false : null),
+    reasoningEffort: String(base.reasoningEffort || '').trim()
   };
 }
 
@@ -387,17 +390,30 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
   const timer = setTimeout(() => controller.abort(), conf.timeoutMs);
   if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
 
-  aiLog(`POST ${url} model=${model} stream=${!!stream} key=${conf.apiKey ? 'set' : 'empty'}`);
+  // 组装请求体；对 DeepSeek 的思考型模型（deepseek-flash / deepseek-reasoner）
+  // 按官方文档附加 thinking / reasoning_effort。其它兼容接口默认不发送，避免报错。
+  const body = {
+    model,
+    messages,
+    stream: !!stream,
+    temperature: Number(temperature ?? conf.temperature),
+    max_tokens: Number(maxTokens ?? conf.maxTokens)
+  };
+  const isDeepSeek = /deepseek/i.test(conf.baseUrl);
+  const thinkingModel = /(flash|reasoner|reason)/i.test(String(model));
+  if (conf.thinking === true || (conf.thinking !== false && isDeepSeek && thinkingModel)) {
+    body.thinking = { type: 'enabled' };
+    const effort = conf.reasoningEffort || (thinkingModel ? 'high' : '');
+    if (effort) body.reasoning_effort = effort;
+  } else if (conf.reasoningEffort) {
+    body.reasoning_effort = conf.reasoningEffort;
+  }
+
+  aiLog(`POST ${url} model=${model} stream=${!!stream} key=${conf.apiKey ? 'set' : 'empty'}${body.thinking ? ' thinking=on' : ''}`);
   const res = await fetch(url, {
     method: 'POST',
     headers: authHeaders(conf),
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: !!stream,
-      temperature: Number(temperature ?? conf.temperature),
-      max_tokens: Number(maxTokens ?? conf.maxTokens)
-    }),
+    body: JSON.stringify(body),
     signal: controller.signal
   });
 

@@ -21,7 +21,9 @@
     "temperature": 0.2,
     "maxTokens": 1600,
     "timeoutMs": 120000,
-    "answerWithoutContext": true
+    "answerWithoutContext": true,
+    "thinking": null,
+    "reasoningEffort": ""
   },
 
   "bootstrap": {

@@ -787,6 +787,9 @@ async function runSuite() {
     eq(unknown.embedModel, '', '未知兼容接口不编造嵌入模型');
     const slash = resolveAiConfig({ ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com/v1/', ai_model: 'deepseek-chat', ai_key_enc: keyEnc });
     eq(slash.baseUrl, 'https://api.deepseek.com/v1', 'Base URL 尾部斜杠被清理（避免 //models 404）');
+    const dsFlash = resolveAiConfig({ ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com/v1', ai_model: 'deepseek-flash', ai_key_enc: keyEnc });
+    eq(dsFlash.thinking, null, '默认 thinking 为自动（DeepSeek 思考型模型自动开启）');
+    eq(dsFlash.reasoningEffort, '', '默认 reasoningEffort 留空由实现回退 high');
     // 「自动」+ 仅填 Key（无 baseUrl）不应把 key 当作可用
     const autoKeyOnly = resolveAiConfig({ ai_provider: 'auto', ai_base_url: '', ai_model: '', ai_key_enc: keyEnc });
     check(autoKeyOnly.provider !== 'openai', '只有 Key 没有 Base URL 时不会启用大模型', autoKeyOnly.provider);
