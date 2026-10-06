@@ -300,8 +300,9 @@ ul, ol { margin: 0; padding: 0; }
 .ws-opt-check { color: var(--c-ink); flex: none; }
 .ws-menu-sep { height: 1px; background: var(--c-border); margin: 5px 4px; }
 
-/* 新建按钮 */
-.btn-new { margin: 0 var(--sp-3) var(--sp-4); justify-content: flex-start; position: relative; }
+/* 新建按钮：不使用 .btn-block 的 width:100%（否则叠加左右外边距会溢出），
+   以 flex 块级盒子撑满侧边栏可用宽度 */
+.sidebar .btn-new { margin: 0 var(--sp-3) var(--sp-4); width: auto; display: flex; justify-content: flex-start; position: relative; }
 .btn-new-icon { width: 14px; height: 14px; flex: none; }
 .btn-new .kbd { position: absolute; right: 8px; }
 .kbd {
