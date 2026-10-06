@@ -78,12 +78,15 @@ export function resolveAiConfig(userRow) {
     if (!/\/v\d+/.test(baseUrl)) baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
   }
 
+  const resolvedModel = chatModel || defaultChatModel(provider, baseUrl);
   return {
     provider,
     baseUrl,
     apiKey,
-    chatModel: chatModel || defaultChatModel(provider),
-    embedModel: embedModel || defaultEmbedModel(provider),
+    chatModel: resolvedModel,
+    // 未配置模型名时不做编造，交由上层明确提示，避免静默回退到本地引擎
+    modelMissing: provider === 'openai' && !resolvedModel,
+    embedModel: embedModel || defaultEmbedModel(provider, baseUrl),
     ollamaUrl,
     temperature: Number(base.temperature ?? 0.2),
     maxTokens: Number(base.maxTokens ?? 1600),
@@ -91,15 +94,31 @@ export function resolveAiConfig(userRow) {
   };
 }
 
-function defaultChatModel(provider) {
+/**
+ * 仅对可确定的厂商给出默认对话模型；未知的 OpenAI 兼容接口不猜测，
+ * 否则会把 gpt-4o-mini 发往 DeepSeek 等接口导致报错并静默降级。
+ */
+function defaultChatModel(provider, baseUrl = '') {
   if (provider === 'ollama') return 'qwen2.5:7b';
-  if (provider === 'openai') return 'gpt-4o-mini';
-  return 'local-extractive';
+  if (provider !== 'openai') return 'local-extractive';
+  const u = String(baseUrl || '').toLowerCase();
+  if (u.includes('api.openai.com') || u.includes('openai.azure.com')) return 'gpt-4o-mini';
+  if (u.includes('deepseek')) return 'deepseek-chat';
+  if (u.includes('dashscope') || u.includes('aliyun')) return 'qwen-plus';
+  if (u.includes('moonshot')) return 'moonshot-v1-8k';
+  if (u.includes('bigmodel') || u.includes('zhipu')) return 'glm-4-flash';
+  if (u.includes('volces') || u.includes('volcengine')) return 'doubao-pro-32k';
+  return '';
 }
 
-function defaultEmbedModel(provider) {
+/** 嵌入模型同理：仅当能确定厂商提供嵌入接口时才给默认值 */
+function defaultEmbedModel(provider, baseUrl = '') {
   if (provider === 'ollama') return '';
-  if (provider === 'openai') return 'text-embedding-3-small';
+  if (provider !== 'openai') return '';
+  const u = String(baseUrl || '').toLowerCase();
+  if (u.includes('api.openai.com')) return 'text-embedding-3-small';
+  if (u.includes('dashscope') || u.includes('aliyun')) return 'text-embedding-v3';
+  if (u.includes('bigmodel') || u.includes('zhipu')) return 'embedding-3';
   return '';
 }
 
@@ -178,9 +197,15 @@ export async function probeAiConfig(conf) {
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       const models = (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);
+      let note = 'OpenAI 兼容接口可用';
+      if (!conf.chatModel) {
+        note = '接口可访问，但未指定对话模型名（如 deepseek-chat），对话时无法调用大模型';
+      } else if (models.length && !models.includes(conf.chatModel)) {
+        note = `接口可用，但模型「${conf.chatModel}」不在返回的模型列表中，请确认模型名是否正确`;
+      }
       return {
-        provider: 'openai', requested: 'openai', available: true, models,
-        model: conf.chatModel, baseUrl: conf.baseUrl, note: 'OpenAI 兼容接口可用'
+        provider: 'openai', requested: 'openai', available: Boolean(conf.chatModel), models,
+        model: conf.chatModel || '（未指定）', baseUrl: conf.baseUrl, note
       };
     }
     return {

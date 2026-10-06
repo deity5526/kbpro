@@ -674,13 +674,37 @@ function bindAi(container, ctx) {
   const offs = [];
   const panel = qs('[data-panel="ai"]', container);
 
+  function readAiForm() {
+    return {
+      provider: qs('#ai-provider', panel)?.value || 'auto',
+      model: (qs('#ai-model', panel)?.value || '').trim(),
+      baseUrl: (qs('#ai-base', panel)?.value || '').trim(),
+      apiKey: qs('#ai-key', panel)?.value || ''
+    };
+  }
+  /** 返回错误文案；合法时返回空串。避免「填了 key 却静默不生效」 */
+  function validateAiForm(v) {
+    if (v.baseUrl && !/^https?:\/\//i.test(v.baseUrl)) {
+      return 'Base URL 必须以 http:// 或 https:// 开头';
+    }
+    if (v.provider === 'openai') {
+      if (!v.baseUrl) return 'OpenAI 兼容接口必须填写 Base URL（例如 https://api.deepseek.com/v1）';
+      if (!v.model) return 'OpenAI 兼容接口必须填写模型名（DeepSeek 请填 deepseek-chat）';
+    }
+    if (v.provider === 'ollama' && !v.model) {
+      return 'Ollama 需要填写已拉取的模型名（例如 qwen2.5:7b）';
+    }
+    if (v.provider === 'auto' && v.apiKey && !v.baseUrl) {
+      return '选择「自动」时若填写了 API Key，必须同时填写 Base URL，否则不会启用大模型';
+    }
+    return '';
+  }
+
   /* 保存个人 AI 配置 */
   offs.push(on(panel, 'click', '[data-act="save-ai"]', async (e, node) => {
-    const provider = qs('#ai-provider', panel)?.value || 'auto';
-    const model = (qs('#ai-model', panel)?.value || '').trim();
-    const baseUrl = (qs('#ai-base', panel)?.value || '').trim();
-    const apiKey = qs('#ai-key', panel)?.value || '';
-    if (baseUrl && !/^https?:\/\//i.test(baseUrl)) { notify.warn('Base URL 必须以 http:// 或 https:// 开头'); return; }
+    const { provider, model, baseUrl, apiKey } = readAiForm();
+    const problem = validateAiForm({ provider, model, baseUrl, apiKey });
+    if (problem) { notify.warn(problem); return; }
 
     await withLoading(node, async () => {
       try {
@@ -716,16 +740,11 @@ function bindAi(container, ctx) {
 
   /* 测试连接：使用表单当前值（无需先保存），且不覆盖已填内容 */
   offs.push(on(panel, 'click', '[data-act="test-ai"]', async (e, node) => {
+    const { provider, model, baseUrl, apiKey } = readAiForm();
+    const problem = validateAiForm({ provider, model, baseUrl, apiKey });
+    if (problem) { notify.warn(problem); return; }
     await withLoading(node, async () => {
       try {
-        const provider = qs('#ai-provider', panel)?.value || 'auto';
-        const model = (qs('#ai-model', panel)?.value || '').trim();
-        const baseUrl = (qs('#ai-base', panel)?.value || '').trim();
-        const apiKey = qs('#ai-key', panel)?.value || '';
-        if (baseUrl && !/^https?:\/\//i.test(baseUrl)) {
-          notify.warn('Base URL 必须以 http:// 或 https:// 开头');
-          return;
-        }
         const res = await ctx.api.testAiConfig({ provider, model, baseUrl, apiKey });
         const status = res?.status || {};
         if (status.provider === 'local') {

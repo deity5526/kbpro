@@ -759,7 +759,8 @@ async function runSuite() {
     check(typeof status.data.effective.embedModel === 'string', '返回嵌入模型字段');
 
     // Ollama 地址归一化：不能把监听地址 0.0.0.0 当成连接地址
-    const { normalizeOllamaUrl } = await import('../server/lib/ai.js');
+    const { normalizeOllamaUrl, resolveAiConfig } = await import('../server/lib/ai.js');
+    const { encryptText } = await import('../server/lib/crypto.js');
     eq(normalizeOllamaUrl('0.0.0.0'), 'http://127.0.0.1:11434', '0.0.0.0 归一化为本机回环地址');
     eq(normalizeOllamaUrl(':11434'), 'http://127.0.0.1:11434', ':11434 补全主机名');
     eq(normalizeOllamaUrl('127.0.0.1:11434'), 'http://127.0.0.1:11434', '裸 host:port 补全协议');
@@ -767,6 +768,19 @@ async function runSuite() {
     eq(normalizeOllamaUrl('http://localhost:11434'), 'http://127.0.0.1:11434', 'localhost 归一化为回环');
     eq(normalizeOllamaUrl('https://ollama.example.com'), 'https://ollama.example.com', 'https 不强行追加 11434');
     eq(normalizeOllamaUrl('10.0.0.5'), 'http://10.0.0.5:11434', '远程主机补默认端口');
+
+    // 模型默认值：不得把 OpenAI 的模型名硬套到其它兼容接口（否则静默回退本地引擎）
+    const keyEnc = encryptText('dummy-key');
+    const ds = resolveAiConfig({ ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com/v1', ai_model: '', ai_key_enc: keyEnc });
+    eq(ds.provider, 'openai', '显式 openai + baseUrl + key 生效');
+    eq(ds.chatModel, 'deepseek-chat', 'DeepSeek 未填模型时推断为 deepseek-chat');
+    const unknown = resolveAiConfig({ ai_provider: 'openai', ai_base_url: 'https://gateway.example.com/v1', ai_model: '', ai_key_enc: keyEnc });
+    eq(unknown.chatModel, '', '未知兼容接口不编造模型名');
+    eq(unknown.modelMissing, true, '未指定模型时标记 modelMissing');
+    eq(unknown.embedModel, '', '未知兼容接口不编造嵌入模型');
+    // 「自动」+ 仅填 Key（无 baseUrl）不应把 key 当作可用
+    const autoKeyOnly = resolveAiConfig({ ai_provider: 'auto', ai_base_url: '', ai_model: '', ai_key_enc: keyEnc });
+    check(autoKeyOnly.provider !== 'openai', '只有 Key 没有 Base URL 时不会启用大模型', autoKeyOnly.provider);
   }
 
   /* ============================ 权限边界 ============================ */
