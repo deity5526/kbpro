@@ -566,7 +566,7 @@ async function loadAi(container, ctx) {
   }
 }
 
-function paintAiStatus(panel, data) {
+function paintAiStatus(panel, data, { fillForm = true } = {}) {
   const host = qs('#pf-ai-status', panel);
   if (!host || !data) return;
 
@@ -574,6 +574,7 @@ function paintAiStatus(panel, data) {
   panel._aiModels = Array.isArray(status.models) ? status.models.slice(0, 24) : [];
   const config = data.config || {};
   const global = data.global || {};
+  if (fillForm) panel._aiData = data;
   const provider = status.provider || config.provider || 'local';
   const effective = config.effective || {};
 
@@ -582,26 +583,28 @@ function paintAiStatus(panel, data) {
     ? badge('可用 · 内置本地引擎', 'info')
     : (status.available ? badge('可用', 'success') : badge('不可用', 'danger'));
 
-  /* 回填表单当前值 */
-  const providerSelect = qs('#ai-provider', panel);
-  if (providerSelect && config.provider) providerSelect.value = config.provider;
-  const modelInput = qs('#ai-model', panel);
-  if (modelInput) modelInput.value = config.model || effective.model || '';
-  const baseInput = qs('#ai-base', panel);
-  if (baseInput) baseInput.value = config.baseUrl || '';
+  if (fillForm) {
+    /* 回填表单当前值 */
+    const providerSelect = qs('#ai-provider', panel);
+    if (providerSelect && config.provider) providerSelect.value = config.provider;
+    const modelInput = qs('#ai-model', panel);
+    if (modelInput) modelInput.value = config.model || effective.model || '';
+    const baseInput = qs('#ai-base', panel);
+    if (baseInput) baseInput.value = config.baseUrl || '';
 
-  /* 已保存密钥：显示状态与清除入口 */
-  const keyInput = qs('#ai-key', panel);
-  const clearBtn = qs('[data-act="clear-key"]', panel);
-  const keyHint = qs('#ai-key-hint', panel);
-  if (config.hasKey) {
-    if (clearBtn) clearBtn.hidden = false;
-    if (keyInput) keyInput.placeholder = '已保存密钥（••••••••），留空则保持不变';
-    if (keyHint) keyHint.textContent = '已保存个人密钥。留空表示不修改；填写新值会覆盖旧密钥。';
-  } else {
-    if (clearBtn) clearBtn.hidden = true;
-    if (keyInput) keyInput.placeholder = 'sk-…';
-    if (keyHint) keyHint.textContent = '密钥在服务端加密存储，接口只返回「是否已保存」。';
+    /* 已保存密钥：显示状态与清除入口 */
+    const keyInput = qs('#ai-key', panel);
+    const clearBtn = qs('[data-act="clear-key"]', panel);
+    const keyHint = qs('#ai-key-hint', panel);
+    if (config.hasKey) {
+      if (clearBtn) clearBtn.hidden = false;
+      if (keyInput) keyInput.placeholder = '已保存密钥（••••••••），留空则保持不变';
+      if (keyHint) keyHint.textContent = '已保存个人密钥。留空表示不修改；填写新值会覆盖旧密钥。';
+    } else {
+      if (clearBtn) clearBtn.hidden = true;
+      if (keyInput) keyInput.placeholder = 'sk-…';
+      if (keyHint) keyHint.textContent = '密钥在服务端加密存储，接口只返回「是否已保存」。';
+    }
   }
 
   host.innerHTML = `
@@ -711,19 +714,39 @@ function bindAi(container, ctx) {
     }
   }));
 
-  /* 测试连接 */
+  /* 测试连接：使用表单当前值（无需先保存），且不覆盖已填内容 */
   offs.push(on(panel, 'click', '[data-act="test-ai"]', async (e, node) => {
     await withLoading(node, async () => {
       try {
-        const data = await ctx.api.aiConfig();
-        paintAiStatus(panel, data);
-        const status = data?.status || {};
-        if (status.provider === 'local' || status.available) {
+        const provider = qs('#ai-provider', panel)?.value || 'auto';
+        const model = (qs('#ai-model', panel)?.value || '').trim();
+        const baseUrl = (qs('#ai-base', panel)?.value || '').trim();
+        const apiKey = qs('#ai-key', panel)?.value || '';
+        if (baseUrl && !/^https?:\/\//i.test(baseUrl)) {
+          notify.warn('Base URL 必须以 http:// 或 https:// 开头');
+          return;
+        }
+        const res = await ctx.api.testAiConfig({ provider, model, baseUrl, apiKey });
+        const status = res?.status || {};
+        if (status.provider === 'local') {
+          // 请求的提供商不可用时会回退到本地引擎，按实际情况提示而非误报成功
+          notify.warn(status.note || '连接失败，已回退到内置本地引擎');
+        } else if (status.available) {
           const count = Array.isArray(status.models) ? status.models.length : 0;
           notify.success(`连接正常：${status.provider}${count ? ` · 发现 ${count} 个模型` : ''}`);
         } else {
           notify.warn(status.note || '当前引擎不可用');
         }
+        // 仅刷新状态卡片（不回填表单），并让「生效」信息反映本次探测结果
+        const base = panel._aiData || { config: {}, global: {} };
+        paintAiStatus(panel, {
+          ...base,
+          status,
+          config: {
+            ...(base.config || {}),
+            effective: { provider: status.provider, model: status.model, baseUrl: status.baseUrl || base.config?.baseUrl }
+          }
+        }, { fillForm: false });
       } catch (err) {
         notify.error(err?.message || '测试失败');
       }

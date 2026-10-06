@@ -16,7 +16,7 @@ import {
 } from '../lib/tags.js';
 import { workspaceTags, renameTag, deleteTag, cleanupOrphanTags } from '../lib/tags.js';
 import { normalizeTags } from '../lib/text.js';
-import { probeAi, resolveAiConfig } from '../lib/ai.js';
+import { probeAi, probeAiConfig, resolveAiConfig } from '../lib/ai.js';
 
 /* ------------------------------------------------------------------ 校验工具 */
 
@@ -152,6 +152,33 @@ export function registerCoreRoutes(router) {
       },
       global: (() => { const c = loadConfig(); return { provider: c.ai.provider, baseUrl: c.ai.baseUrl, chatModel: c.ai.chatModel, hasKey: Boolean(c.ai.apiKey), ollamaUrl: c.ai.ollamaUrl }; })()
     });
+  });
+
+  /**
+   * 测试连接：用表单当前值（未保存也可）探测，不写库。
+   * body: { provider, model, baseUrl, apiKey }
+   */
+  router.post('/api/users/me/ai/test', async (req, res, ctx) => {
+    const user = ctx.requireUser();
+    const { provider, model, baseUrl, apiKey } = ctx.body || {};
+    if (provider !== undefined && provider !== null && provider !== ''
+      && !['auto', 'ollama', 'openai', 'local'].includes(String(provider).toLowerCase())) {
+      throw httpError(400, '不支持的 AI 提供商');
+    }
+    if (baseUrl !== undefined && baseUrl !== null && baseUrl !== ''
+      && !/^https?:\/\//i.test(String(baseUrl).trim())) {
+      throw httpError(400, 'Base URL 必须以 http:// 或 https:// 开头');
+    }
+    // 以「已保存配置」为底，表单值覆盖；密钥留空则沿用已保存的
+    const effectiveUser = {
+      ai_provider: provider ?? user.ai_provider,
+      ai_model: model ?? user.ai_model,
+      ai_base_url: baseUrl ?? user.ai_base_url,
+      ai_key_enc: apiKey ? encryptText(String(apiKey).slice(0, 500)) : user.ai_key_enc
+    };
+    const conf = resolveAiConfig(effectiveUser);
+    const status = await probeAiConfig(conf);
+    sendJson(res, 200, { ok: true, status });
   });
 
   router.put('/api/users/me/ai', async (req, res, ctx) => {

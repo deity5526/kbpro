@@ -73,6 +73,7 @@ export const api = {
   changePassword: (oldPassword, newPassword) => post('/api/users/me/password', { oldPassword, newPassword }),
   storage: () => get('/api/users/me/storage'),
   aiConfig: () => get('/api/users/me/ai'),
+  testAiConfig: (payload) => post('/api/users/me/ai/test', payload),
   saveAiConfig: (payload) => put('/api/users/me/ai', payload),
   searchUsers: (q) => get(`/api/users/search${qs({ q })}`),
   notifications: () => get('/api/notifications'),

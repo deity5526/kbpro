@@ -595,6 +595,15 @@ async function runSuite() {
     check(status.data.effective.provider !== undefined, '返回实际生效的提供商', status.data.effective);
     check(status.data.index.indexed >= 1, '已有文件完成索引', status.data.index);
 
+    // 测试连接：使用表单值探测且不写库
+    const aiTest = await json('POST', '/api/users/me/ai/test', { provider: 'local', model: '', baseUrl: '', apiKey: '' });
+    eq(aiTest.status, 200, '测试连接接口可用');
+    eq(aiTest.data.status.provider, 'local', '内置引擎测试返回 local');
+    const aiTestBadUrl = await json('POST', '/api/users/me/ai/test', { provider: 'openai', baseUrl: 'ftp://x', apiKey: 'k' });
+    eq(aiTestBadUrl.status, 400, '测试连接拒绝非法 Base URL');
+    const afterTest = await json('GET', '/api/users/me/ai');
+    check(!afterTest.data.config.provider, '测试连接不会写入配置', afterTest.data.config.provider);
+
     const ask = await json('POST', '/api/ai/ask', {
       question: '本季度营收增长了多少？主要驱动力是什么？',
       workspaceId: personalWs,

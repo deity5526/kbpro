@@ -129,7 +129,14 @@ export async function probeOllama(url = 'http://127.0.0.1:11434', timeoutMs = 25
 }
 
 export async function probeAi(userRow) {
-  const conf = resolveAiConfig(userRow);
+  return probeAiConfig(resolveAiConfig(userRow));
+}
+
+/** 用给定配置探测可用性（不落库，供「测试连接」按未保存的表单值验证） */
+export async function probeAiConfig(conf) {
+  if (!conf) {
+    return { provider: 'local', requested: 'local', available: true, models: ['local-extractive'], model: 'local-extractive', note: '内置本地引擎' };
+  }
 
   if (conf.provider === 'local') {
     return {

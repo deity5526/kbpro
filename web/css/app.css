@@ -552,6 +552,7 @@ ul, ol { margin: 0; padding: 0; }
   height: 19px; padding: 0 7px; border-radius: 5px;
   font-size: var(--fs-xs); font-weight: 550; letter-spacing: .01em;
   background: var(--c-ink-100); color: var(--c-ink-600);
+  white-space: nowrap; flex: none;
 }
 .badge-success { background: var(--c-success-bg); color: var(--c-success); }
 .badge-warn { background: var(--c-warn-bg); color: var(--c-warn); }
