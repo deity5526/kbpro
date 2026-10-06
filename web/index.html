@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F2937">
+<meta name="description" content="KBPRO — 个人 & 团队轻量化智能知识库平台。文档存储、智能解析、问答检索、知识沉淀。">
+<title>KBPRO · 智能知识库</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231F2937'/%3E%3Cpath d='M9 22V10h3.2v4.6L16.4 10h4l-4.8 6 5 6h-4.1l-4.3-5.2V22z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- ============================= 启动加载 ============================= -->
+<div id="boot" class="boot">
+  <div class="boot-mark">K</div>
+  <div class="boot-bar"><span></span></div>
+</div>
+
+<!-- ============================= 登录 / 注册 ============================= -->
+<div id="auth-screen" class="auth-screen" hidden>
+  <div class="auth-aside">
+    <div class="auth-brand">
+      <div class="brand-mark">K</div>
+      <div>
+        <div class="brand-name">KBPRO</div>
+        <div class="brand-sub">智能知识库平台</div>
+      </div>
+    </div>
+    <h1 class="auth-headline">把散落的文档，<br>变成可对话的知识。</h1>
+    <ul class="auth-points">
+      <li><span class="dot"></span>多格式文档解析 · PDF / Word / Excel / PPT / Markdown</li>
+      <li><span class="dot"></span>基于私有文档的 RAG 问答，答案自带引用来源</li>
+      <li><span class="dot"></span>个人与团队知识库双体系，权限与共享可控</li>
+      <li><span class="dot"></span>本地优先架构 · 数据加密 · 备份导出</li>
+    </ul>
+    <div class="auth-foot">零外部依赖 · 数据存储在您自己的服务器上</div>
+  </div>
+
+  <div class="auth-main">
+    <div class="auth-card">
+      <div class="auth-tabs" role="tablist">
+        <button class="auth-tab is-active" data-mode="login" role="tab">登录</button>
+        <button class="auth-tab" data-mode="register" role="tab">注册</button>
+      </div>
+
+      <form id="auth-form" autocomplete="on">
+        <div class="field" data-field="name" hidden>
+          <label for="auth-name">昵称</label>
+          <input id="auth-name" name="name" type="text" placeholder="如何称呼你" autocomplete="name">
+        </div>
+        <div class="field">
+          <label for="auth-email">邮箱</label>
+          <input id="auth-email" name="email" type="email" placeholder="you@example.com" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="auth-password">密码</label>
+          <input id="auth-password" name="password" type="password" placeholder="至少 8 位" autocomplete="current-password" required>
+        </div>
+        <div class="auth-error" id="auth-error" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit" id="auth-submit">登录</button>
+      </form>
+
+      <div class="auth-demo" id="auth-demo" hidden>
+        <div class="auth-demo-title">首次使用？</div>
+        <div class="auth-demo-body">默认管理员账号 <code>admin@kbpro.local</code> / <code>admin12345</code></div>
+        <button class="btn btn-ghost btn-sm" type="button" id="auth-fill-demo">填入默认账号</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= 主应用 ============================= -->
+<div id="app" class="app" hidden>
+
+  <!-- 侧边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <div class="brand-mark sm">K</div>
+        <span class="brand-name">KBPRO</span>
+      </div>
+      <button class="icon-btn" id="sidebar-collapse" title="收起侧边栏" aria-label="收起侧边栏"></button>
+    </div>
+
+    <div class="ws-switch" id="ws-switch">
+      <button class="ws-current" id="ws-current" aria-haspopup="listbox" aria-expanded="false">
+        <span class="ws-icon" id="ws-icon"></span>
+        <span class="ws-meta">
+          <span class="ws-name" id="ws-name">知识库</span>
+          <span class="ws-kind" id="ws-kind">个人</span>
+        </span>
+        <span class="ws-caret"></span>
+      </button>
+      <div class="ws-menu" id="ws-menu" hidden></div>
+    </div>
+
+    <button class="btn btn-primary btn-block btn-new" id="btn-new">
+      <span class="btn-new-icon"></span>新建
+      <span class="kbd">N</span>
+    </button>
+
+    <nav class="nav" id="nav">
+      <a class="nav-item" data-route="dashboard" href="#/dashboard"><span class="nav-ico" data-icon="home"></span><span class="nav-label">首页</span></a>
+      <a class="nav-item" data-route="files" href="#/files"><span class="nav-ico" data-icon="file"></span><span class="nav-label">文件库</span><span class="nav-badge" id="nav-badge-files"></span></a>
+      <a class="nav-item" data-route="notes" href="#/notes"><span class="nav-ico" data-icon="note"></span><span class="nav-label">笔记中心</span><span class="nav-badge" id="nav-badge-notes"></span></a>
+      <a class="nav-item" data-route="folders" href="#/folders"><span class="nav-ico" data-icon="folder"></span><span class="nav-label">分类文件夹</span></a>
+      <a class="nav-item" data-route="chat" href="#/chat"><span class="nav-ico" data-icon="sparkle"></span><span class="nav-label">智能问答</span><span class="nav-dot" id="nav-dot-ai"></span></a>
+      <a class="nav-item" data-route="search" href="#/search"><span class="nav-ico" data-icon="search"></span><span class="nav-label">全局检索</span></a>
+      <div class="nav-sep"></div>
+      <a class="nav-item" data-route="team" href="#/team"><span class="nav-ico" data-icon="users"></span><span class="nav-label">团队协作</span></a>
+      <a class="nav-item" data-route="trash" href="#/trash"><span class="nav-ico" data-icon="trash"></span><span class="nav-label">回收站</span></a>
+      <a class="nav-item" data-route="admin" href="#/admin" id="nav-admin" hidden><span class="nav-ico" data-icon="shield"></span><span class="nav-label">系统管理</span></a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <a class="user-chip" id="user-chip" href="#/profile">
+        <span class="avatar" id="user-avatar">?</span>
+        <span class="user-meta">
+          <span class="user-name" id="user-name">用户</span>
+          <span class="user-role" id="user-role">成员</span>
+        </span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="mobile-menu" aria-label="菜单"></button>
+      <div class="crumbs" id="crumbs"></div>
+      <div class="topbar-actions">
+        <button class="search-trigger" id="search-trigger">
+          <span class="st-ico"></span>
+          <span class="st-text">搜索文档、笔记、标签…</span>
+          <span class="kbd">Ctrl K</span>
+        </button>
+        <button class="icon-btn" id="upload-trigger" title="上传文件"></button>
+        <button class="icon-btn" id="notify-trigger" title="通知">
+          <span class="badge-dot" id="notify-dot" hidden></span>
+        </button>
+        <button class="icon-btn" id="ai-trigger" title="智能问答"></button>
+      </div>
+    </header>
+
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+
+  <!-- 上传进度面板 -->
+  <div class="upload-panel" id="upload-panel" hidden>
+    <div class="up-head">
+      <span class="up-title" id="up-title">上传中</span>
+      <button class="icon-btn sm" id="up-close" aria-label="收起"></button>
+    </div>
+    <div class="up-list" id="up-list"></div>
+  </div>
+
+  <!-- 全局拖拽遮罩 -->
+  <div class="drop-veil" id="drop-veil" hidden>
+    <div class="drop-inner">
+      <div class="drop-ico" data-icon="upload"></div>
+      <div class="drop-title">松开即可上传到当前知识库</div>
+      <div class="drop-sub" id="drop-sub">支持 PDF、Word、Excel、PPT、Markdown、TXT 等</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= 全局组件容器 ============================= -->
+<div id="modal-root"></div>
+<div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+<div id="palette-root"></div>
+<input type="file" id="hidden-file-input" multiple hidden>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "kbpro",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "KBPRO — 个人 & 团队轻量化智能知识库平台 (RAG Knowledge Base)",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node tests/run-all.mjs",
+    "test:api": "node tests/test-api.mjs",
+    "test:full": "node tests/run-all.mjs --full"
+  },
+  "dependencies": {},
+  "keywords": [
+    "knowledge-base",
+    "rag",
+    "notes",
+    "document-management"
+  ],
+  "license": "MIT"
+}
