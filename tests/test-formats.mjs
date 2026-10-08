@@ -74,6 +74,49 @@ async function uploadFile(name, buffer, mime, workspaceId, extra = {}) {
   return { file: r.data.files[0] };
 }
 
+/* ------------------------------------------------------------------ 内联 PDF 构造 */
+
+/**
+ * 构造一个「同一行由两个字体交错绘制」的 PDF。
+ *
+ * 这是 LibreOffice / Word 排版 CJK 时的常见输出：一行文字被拆给两个字体子集，
+ * 在内容流里交替出现，必须按每个簇的 X 坐标交错排序才能得到正确顺序。
+ *
+ * 设计：等宽字体（每字符 6pt @10pt），目标文本 ABCDE 位于 x=100,106,112,118,124：
+ *   F1 画 A(100) C(112) E(124)        F2 画 B(106) D(118)
+ * 正确结果 "ABCDE"；若把整段 TJ 当成一个 run、按 run 起始 X 排序，会得到 "ACEBD"。
+ */
+function buildInterleavedFontPdf() {
+  const content = [
+    'BT /F1 10 Tf 100 700 Td [(A) -600 (C) -600 (E)] TJ ET',
+    'BT 1 0 0 1 106 700 Tm /F2 10 Tf [(B) -600 (D)] TJ ET'
+  ].join('\n');
+
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+      + '/Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding '
+      + '/FirstChar 65 /LastChar 69 /Widths [600 600 600 600 600] >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding '
+      + '/FirstChar 65 /LastChar 69 /Widths [600 600 600 600 600] >>'
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  objs.forEach((body, i) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefPos = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) pdf += `${String(off).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  return Buffer.from(pdf, 'latin1');
+}
+
 /* ------------------------------------------------------------------ 主流程 */
 
 async function main() {
@@ -202,6 +245,20 @@ async function run() {
     const pwPdf = await uploadFile('受密码保护.pdf', fixture('pdf/encrypted-password.pdf'), 'application/pdf', wsId);
     const pw = await waitParsed(pwPdf.file.id);
     check(pw.status !== 'ok' || pw.chars >= 0, '需要口令的 PDF 不导致服务异常', pw.status);
+  }
+
+  /* ============================ PDF 阅读顺序 ============================ */
+  head('PDF 阅读顺序 · 同一行两个字体交错绘制');
+  {
+    // LibreOffice / Word 排版 CJK 时会把一行拆给多个字体子集交替绘制，
+    // 必须按每个簇的 X 交错排序才能得到正确顺序（见 buildInterleavedFontPdf 注释）。
+    const r = await uploadFile('交错字体.pdf', buildInterleavedFontPdf(), 'application/pdf', wsId);
+    check(!r.error, '交错字体 PDF 上传成功', r.error);
+    const d = await waitParsed(r.file.id);
+    check(d.status === 'ok', '交错字体 PDF 解析成功', d.status);
+    const flat = String(d.text || '').replace(/\s+/g, '');
+    check(flat.includes('ABCDE'), '同行的交错文本按 X 坐标正确排序（ABCDE）', d.text);
+    check(!flat.includes('ACEBD'), '不再按 run 起始位置整段拼接（不会得到 ACEBD）', d.text);
   }
 
   /* ============================ 纯文本族 ============================ */

@@ -24,3 +24,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 演示文档生成物（用 scripts/make-demo-docs.py 重新生成）
+demo-docs/

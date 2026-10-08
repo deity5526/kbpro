@@ -1791,39 +1791,83 @@ function runContent(doc, content, resourcesRef, ctm0, out, depth) {
     if (tx !== 0) st.tm = mmul([1, 0, 0, 1, tx, 0], st.tm);
   };
 
-  /** Draw a `TJ` array (strings + kerning numbers). */
+  /**
+   * Draw a `TJ` array (strings + kerning numbers).
+   *
+   * 关键点：不能在数组内一路累积成**一个** run。LibreOffice / Word 在排版 CJK 文本时
+   * 经常把同一行拆成多个字体子集交替绘制，例如：
+   *
+   *     [<01>-3037<02>-9<03>-9<04>]TJ      ← 字体 F1：用(90) 洞(194) 察(220) 摘(246)
+   *     1 0 0 1 116.35 691.65 Tm
+   *     [<01>-9<02>-9<03>-3037<04>]TJ      ← 字体 F2：户(116) 访(143) 谈(169) 录(272)
+   *
+   * 两段在 X 上是交错的，正确的阅读顺序必须按每个簇的 X 交错排列才能得到
+   * 「用户访谈洞察摘录」。若整段当成一个 run，上层只能按 run 的起始 X 排序，
+   * 就会输出「用洞察摘户访谈录」。因此在横向位移明显处断开成独立 run。
+   */
   const showArray = (arr) => {
     if (!Array.isArray(arr) || !st.font || st.size === 0) return;
     const trm0 = mmul(st.tm, st.ctm);
     const scale = Math.hypot(trm0[0], trm0[1]);
     const step = codeStep();
-    let text = '';
+
+    let text = '';          // 当前簇的文本
+    let start = null;       // 当前簇的起始位置
+    let clusterTx = 0;      // 当前簇的宽度
     let totalTx = 0;
     let chars = 0;
     let spaces = 0;
+
+    const beginCluster = () => {
+      const m = mmul(st.tm, st.ctm);
+      start = { x: m[2] * st.ts + m[4], y: m[3] * st.ts + m[5] };
+      clusterTx = 0;
+    };
+    const flushCluster = () => {
+      if (text && start) {
+        out.push({
+          text, x: start.x, y: start.y,
+          size: Math.max(0.5, st.size * scale),
+          w: Math.abs(clusterTx) * scale, font: st.font,
+        });
+      }
+      text = '';
+      start = null;
+      clusterTx = 0;
+    };
+
     for (const el of arr) {
       if (typeof el === 'number' && Number.isFinite(el)) {
-        // A negative TJ value moves the pen forward. Values around -120/1000 em
-        // are routinely emitted as plain letter-spacing by CJK producers, so the
-        // effective "this is a space" threshold sits at -180/1000 em.
-        if (el < TJ_SPACE_THRESHOLD && text && !/\s$/.test(text)) text += ' ';
-        totalTx += (-el / 1000) * st.size * st.th;
+        // 负值把笔向前推。CJK 排版里 -120/1000 em 量级的字距是常态，
+        // 因此「这是空格」的阈值定在 -180/1000 em。
+        const dx = (-el / 1000) * st.size * st.th;
+        if (Math.abs(dx) > st.size * 0.2) {
+          // 明显的横向跳跃：断开成新的簇，让上层能按 X 正确交错
+          flushCluster();
+        } else if (el < TJ_SPACE_THRESHOLD && text && !/\s$/.test(text)) {
+          text += ' ';
+        }
+        totalTx += dx;
+        st.tm = mmul([1, 0, 0, 1, dx, 0], st.tm);
         continue;
       }
       if (!(el instanceof PStr)) continue;
+      if (!text) beginCluster();
       const r = decodeShowString(doc, st.font, el.s);
       text += r.text;
-      totalTx += (r.wsum / 1000) * st.size * st.th;
+      const adv = (r.wsum / 1000) * st.size * st.th;
+      clusterTx += adv;
+      totalTx += adv;
+      st.tm = mmul([1, 0, 0, 1, adv, 0], st.tm);
       chars += Math.ceil(el.s.length / step);
       spaces += countSpaces(el.s, step);
     }
-    totalTx += (st.tc * chars + st.tw * spaces) * st.th;
-    if (totalTx !== 0) st.tm = mmul([1, 0, 0, 1, totalTx, 0], st.tm);
-    if (text) {
-      out.push({
-        text, x: trm0[2] * st.ts + trm0[4], y: trm0[3] * st.ts + trm0[5],
-        size: Math.max(0.5, st.size * scale), w: Math.abs(totalTx) * scale, font: st.font,
-      });
+
+    flushCluster();
+    const extra = (st.tc * chars + st.tw * spaces) * st.th;
+    if (extra !== 0) {
+      totalTx += extra;
+      st.tm = mmul([1, 0, 0, 1, extra, 0], st.tm);
     }
   };
 

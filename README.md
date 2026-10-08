@@ -374,13 +374,48 @@ KBPRO 会按官方协议自动携带思考参数。当 Base URL 含 `deepseek` �
 
 ## 示例数据
 
-想快速体验检索与问答，可在服务启动后另开终端导入一批示例文档（Markdown）：
+有两种示例数据，可任选或都导入。
+
+### 方式一：多格式演示文档（推荐）
+
+一次生成 **20 个真实文档**（4 个主题 × 5 种格式：`.docx` / `.xlsx` / `.pptx` / `.pdf` / `.md`），
+并按主题自动归入知识库中的同名文件夹：
 
 ```bash
-node server/index.js          # 终端 1：启动服务
-node scripts/seed-demo.mjs    # 终端 2：导入示例文档
-# 或
-npm run seed
+node server/index.js                                  # 终端 1：启动服务
+
+python scripts/make-demo-docs.py demo-docs            # 终端 2：生成文档
+node   scripts/upload-demo-docs.mjs                   #         上传到知识库
+```
+
+生成的文档内容是相互呼应的中文业务资料，便于演示检索与问答：
+
+| 主题文件夹 | 文档 |
+|---|---|
+| **学习资料** | 机器学习基础学习笔记.docx · 技能矩阵与学习进度跟踪表.xlsx · 技术知识体系概览.pptx · 学习路径规划与阶段目标.pdf · 读书笔记-深度工作.md |
+| **项目文档** | 需求规格说明书.docx · 项目排期与里程碑计划.xlsx · 项目启动会汇报.pptx · 系统架构设计说明.pdf · 接口清单与数据字典.md |
+| **会议记录** | 季度经营复盘会议纪要.docx · 决议事项跟踪表.xlsx · 产品评审会汇报.pptx · 周例会纪要汇总.pdf · 周会纪要-第32周.md |
+| **灵感收集** | 产品功能设想草稿.docx · 竞品分析对照表.xlsx · 创新工作坊-新方向探索.pptx · 用户访谈洞察摘录.pdf · 点子清单与优先级评估.md |
+
+上传脚本可重复执行：已存在的同名文件会自动跳过（加 `--force` 强制重传）。
+常用参数：
+
+```bash
+node scripts/upload-demo-docs.mjs --workspace personal     # 只传到个人知识库
+node scripts/upload-demo-docs.mjs --workspace team         # 只传到团队知识库
+node scripts/upload-demo-docs.mjs --base http://host:8787 --email me@x.com --password xxx
+```
+
+> 生成脚本用 `python-docx` / `openpyxl` / `python-pptx` 写出 Office 文件，
+> PDF 由内置 LibreOffice 转换，Excel 公式由 LibreOffice 重算以便缓存值可见。
+> 无需安装任何 npm 依赖。
+
+### 方式二：Markdown 快速种子
+
+只需一批 Markdown 时：
+
+```bash
+node scripts/seed-demo.mjs    # 或 npm run seed
 ```
 
 会导入到默认个人知识库；可用环境变量 `KBPRO_SEED_WORKSPACE` 指定目标知识库，
