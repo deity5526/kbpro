@@ -334,7 +334,42 @@ async function main() {
         '命中知识库时带引用来源', r.done?.citations?.length);
     }
 
-    /* ---------------- 8. SSRF 防护 ---------------- */
+    /* ---------------- 8b. 推理模型思维链过滤 ---------------- */
+    head('推理模型 · 思维链不得泄漏给用户');
+    {
+      const { createThinkFilter, stripThinkTags } = await import('../server/lib/ai.js');
+
+      check(stripThinkTags('<think>我要仔细想想……\n1+1=2</think>答案是 2。') === '答案是 2。',
+        '非流式：思维链被完整剥离');
+      check(stripThinkTags('没有思维链的普通回答') === '没有思维链的普通回答', '非流式：无标签时原样返回');
+      check(stripThinkTags('<thinking>长推理</thinking>结论') === '结论', '兼容 <thinking> 变体');
+
+      // 流式：把内容切成小块喂入，模拟 token 流（含标签被切断的情况）
+      const cases = [
+        [['<think>推理过程</think>最终答案'], '最终答案'],
+        [['<thi', 'nk>推理', '</thi', 'nk>最终', '答案'], '最终答案'],
+        [['前缀<think>中段推理</think>后缀'], '前缀后缀'],
+        [['<think>只有推理没有正文</think>'], ''],
+        [['普通回答'], '普通回答'],
+        [['答案里提到 think 这个词'], '答案里提到 think 这个词']
+      ];
+      for (const [chunks, expected] of cases) {
+        let out = '';
+        const f = createThinkFilter((t) => { out += t; });
+        for (const c of chunks) f.push(c);
+        f.flush();
+        check(out === expected, `流式分块剥离：${JSON.stringify(chunks.join(''))}`, { got: out, expected });
+      }
+
+      // 逐字节切分（最坏情况）也不能泄漏标签碎片
+      let out2 = '';
+      const f2 = createThinkFilter((t) => { out2 += t; });
+      for (const ch of '<think>a</think>BB<thinking>c</thinking>CC') f2.push(ch);
+      f2.flush();
+      check(out2 === 'BBCC', '逐字节切分也不泄漏标签碎片', out2);
+    }
+
+    /* ---------------- 9. SSRF 防护 ---------------- */
     head('安全 · 用户自定义 Base URL 的 SSRF 防护');
     {
       const cloud = [
@@ -357,7 +392,7 @@ async function main() {
       check(badScheme.status >= 400, '拒绝非 http(s) 协议', badScheme.status);
     }
 
-    /* ---------------- 9. 恢复可用配置 ---------------- */
+    /* ---------------- 10. 恢复可用配置 ---------------- */
     head('恢复 · 回到正常配置');
     {
       await api('PUT', '/api/users/me/ai', { provider: 'openai', baseUrl: `${UP}/ok/v1`, model: 'fake-model', apiKey: 'k' });

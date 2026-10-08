@@ -253,13 +253,13 @@ export function resolveAiConfig(userRow) {
   const cfg = loadConfig();
   const base = cfg.ai || {};
 
-  let provider = String(userRow?.ai_provider || base.provider || 'auto').toLowerCase();
+  const userProvider = String(userRow?.ai_provider || '').toLowerCase();
+  const userModel = String(userRow?.ai_model || '').trim();
+  let provider = userProvider || String(base.provider || 'auto').toLowerCase();
   let baseUrl = String(userRow?.ai_base_url || base.baseUrl || '').trim();
   let apiKey = '';
   if (userRow?.ai_key_enc) apiKey = decryptText(userRow.ai_key_enc);
   if (!apiKey) apiKey = String(base.apiKey || '');
-  let chatModel = String(userRow?.ai_model || base.chatModel || '').trim();
-  const embedModel = String(base.embedModel || '').trim();
   const ollamaUrl = normalizeOllamaUrl(process.env.KBPRO_OLLAMA_URL || base.ollamaUrl);
 
   if (provider === 'auto') {
@@ -280,6 +280,20 @@ export function resolveAiConfig(userRow) {
       baseUrl = `${baseUrl}/v1`;
     }
   }
+
+  /**
+   * 全局模型名只应作用于「全局那一套提供商」。
+   *
+   * 反例：管理员把全局默认设成本机 Ollama 的 deepseek-r1:8b；某用户却在个人中心
+   * 配置了指向 api.deepseek.com 的 OpenAI 兼容接口但没填模型名。若直接把全局模型名
+   * 套过去，就会把 deepseek-r1:8b 发给云端 DeepSeek 接口 → 必然 400。
+   * 因此仅在用户未指定自己的提供商（或指定的与全局一致）时才沿用全局模型名，
+   * 否则按该提供商/Base URL 推断默认模型。
+   */
+  const globalProvider = String(base.provider || '').toLowerCase();
+  const inheritGlobalModel = !userProvider || userProvider === 'auto' || userProvider === globalProvider;
+  const chatModel = userModel || (inheritGlobalModel ? String(base.chatModel || '').trim() : '');
+  const embedModel = inheritGlobalModel ? String(base.embedModel || '').trim() : '';
 
   const resolvedModel = chatModel || defaultChatModel(provider, baseUrl);
   return {
@@ -529,6 +543,108 @@ function lastUser(messages) {
   return '';
 }
 
+/* ------------------------------------------------------------------ 思维链过滤 */
+
+/**
+ * 过滤推理型模型输出的思维链。
+ *
+ * deepseek-r1 等推理模型会把思维链直接塞进 `message.content`，形如
+ * `<think>……推理过程……</think>真正的回答`。若不处理，用户会在问答界面里
+ * 看到一大段内部推理，真正的答案反而被淹没。
+ *
+ * 这里做成**有状态**的流式过滤器：逐块喂入，只把思维链之外的内容交给 onText；
+ * 同时用缓冲区兜住可能被切断的半个标签，避免标签碎片泄漏成可见文本。
+ */
+export function createThinkFilter(onText) {
+  const OPEN = ['<think>', '<thinking>'];
+  const CLOSE = ['</think>', '</thinking>'];
+  const ALL = [...OPEN, ...CLOSE];
+  const MAXTAG = 11;   // '</thinking>'.length
+  let inThink = false;
+  let buf = '';
+  let thinkChars = 0;
+
+  /**
+   * buf 末尾最长的、同时是某个标签前缀的长度。
+   * 只保留这部分即可——它可能是被切断的半个标签；其余内容可以立即吐出去，
+   * 这样正常文本不会被无谓地延迟（流中断时也不会吞掉已生成的内容）。
+   */
+  const pendingTagLen = (s) => {
+    const max = Math.min(s.length, MAXTAG - 1);
+    for (let len = max; len >= 1; len--) {
+      const tail = s.slice(-len);
+      if (ALL.some((t) => t.startsWith(tail))) return len;
+    }
+    return 0;
+  };
+
+  /** 找出 list 中最早出现的标签，返回 {index, len} */
+  const findEarliest = (s, list) => {
+    let best = -1;
+    let bestLen = 0;
+    for (const t of list) {
+      const i = s.indexOf(t);
+      if (i >= 0 && (best === -1 || i < best)) { best = i; bestLen = t.length; }
+    }
+    return best === -1 ? null : { index: best, len: bestLen };
+  };
+
+  return {
+    push(piece) {
+      buf += String(piece ?? '');
+      let out = '';
+      for (;;) {
+        if (inThink) {
+          const hit = findEarliest(buf, CLOSE);
+          if (hit) {
+            thinkChars += hit.index;
+            buf = buf.slice(hit.index + hit.len);
+            inThink = false;
+            continue;
+          }
+          // 尚未闭合：丢弃推理内容，只留下可能是半个闭合标签的尾巴
+          const keep = pendingTagLen(buf);
+          if (buf.length > keep) {
+            thinkChars += buf.length - keep;
+            buf = keep ? buf.slice(-keep) : '';
+          }
+          break;
+        }
+        const hit = findEarliest(buf, OPEN);
+        if (hit) {
+          out += buf.slice(0, hit.index);
+          buf = buf.slice(hit.index + hit.len);
+          inThink = true;
+          continue;
+        }
+        const keep = pendingTagLen(buf);
+        out += buf.slice(0, buf.length - keep);
+        buf = keep ? buf.slice(-keep) : '';
+        break;
+      }
+      if (out) onText?.(out);
+      return out;
+    },
+    /** 流结束时调用，吐出缓冲区里剩余的正文 */
+    flush() {
+      const rest = inThink ? '' : buf;
+      buf = '';
+      if (rest) onText?.(rest);
+      return rest;
+    },
+    get thinkingChars() { return thinkChars; },
+    get inThinking() { return inThink; }
+  };
+}
+
+/** 非流式场景：一次性剥掉思维链 */
+export function stripThinkTags(text) {
+  return String(text ?? '')
+    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+    .replace(/<\/?think(?:ing)?>/gi, '')
+    .trim();
+}
+
 /* ------------------------------------------------------------------ Ollama */
 
 async function ollamaChat({ conf, model, messages, stream, onToken, onDelta, signal, temperature, maxTokens }) {
@@ -569,25 +685,40 @@ async function ollamaChat({ conf, model, messages, stream, onToken, onDelta, sig
     if (!stream) {
       const data = await res.json();
       if (data.error) throw new Error(`Ollama 返回错误：${String(data.error).slice(0, 200)}`);
+      // 推理型模型（deepseek-r1 等）的思维链会混在 content 里，必须剥掉
+      const raw = data.message?.content || '';
+      const content = stripThinkTags(raw);
       return {
-        content: data.message?.content || '',
+        content,
         provider: 'ollama', model,
+        reasoningChars: Math.max(0, raw.length - content.length),
         usage: { evalCount: data.eval_count, promptEvalCount: data.prompt_eval_count }
       };
     }
 
+    // 流式：用有状态过滤器逐块剔除思维链，避免把 <think> 过程显示给用户
     let content = '';
+    const thinkFilter = createThinkFilter((text) => {
+      content += text;
+      onToken?.(text);
+      onDelta?.(text);
+    });
     await readNdjson(res, (obj) => {
       if (obj.error) throw new Error(`Ollama 返回错误：${String(obj.error).slice(0, 200)}`);
+      // 新版 Ollama 会把推理单独放在 message.thinking，不要拼进正文
       const piece = obj.message?.content || '';
-      if (piece) {
-        content += piece;
-        onToken?.(piece);
-        onDelta?.(piece);
-      }
+      if (piece) thinkFilter.push(piece);
     });
-    if (!content) throw new Error('Ollama 返回了空内容（未收到任何 token）');
-    return { content, provider: 'ollama', model, usage: {} };
+    thinkFilter.flush();
+
+    if (!content) {
+      // 常见于推理占满了 num_predict：思维链有内容但正文一个 token 都没剩下
+      const hint = thinkFilter.thinkingChars > 0
+        ? '推理模型把全部 token 用在了思维链上，请提高「最大 token 数」（实例设置 → AI 全局默认）后重试'
+        : 'Ollama 返回了空内容（未收到任何 token）';
+      throw new Error(hint);
+    }
+    return { content, provider: 'ollama', model, usage: {}, reasoningChars: thinkFilter.thinkingChars };
   } finally {
     finish();
   }
@@ -721,7 +852,8 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
     try {
       const data = await res.json();
       if (data.error) throw new Error(`上游返回错误：${data.error.message || JSON.stringify(data.error).slice(0, 160)}`);
-      const content = data.choices?.[0]?.message?.content || '';
+      const rawContent = data.choices?.[0]?.message?.content || '';
+      const content = stripThinkTags(rawContent);
       // 调用方要的是流式、但上游给了整包 JSON：把内容整体补发一次，避免前端空白
       if (content && onToken) { onToken(content); onDelta?.(content); }
       return { content, provider: 'openai', model, usage: data.usage || {} };
@@ -730,7 +862,14 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
     }
   }
 
+  // 自建推理服务（如 vLLM 跑 deepseek-r1）同样可能把思维链内联在 content 里，
+  // 因此与 Ollama 路径一致地做流式过滤；没有标签时过滤器是直通的。
   let content = '';
+  const thinkFilter = createThinkFilter((text) => {
+    content += text;
+    onToken?.(text);
+    onDelta?.(text);
+  });
   try {
     await readSse(res, (data) => {
       if (data === '[DONE]') return;
@@ -743,22 +882,24 @@ async function openaiChat({ conf, model, messages, stream, onToken, onDelta, sig
         throw e;
       }
       const choice = obj.choices?.[0] || {};
+      // DeepSeek 官方接口把推理放在 reasoning_content，正文在 content，天然分离；
+      // 这里只取正文，避免把推理混进回答。
       const piece = choice.delta?.content || choice.message?.content || '';
-      if (piece) {
-        content += piece;
-        onToken?.(piece);
-        onDelta?.(piece);
-      }
+      if (piece) thinkFilter.push(piece);
     });
+    thinkFilter.flush();
   } finally {
     finish();
   }
 
   // 流结束但一个字都没有，且没有任何错误信号：如实报告，避免「空回答」
   if (!content) {
-    throw new Error('上游返回了空内容（未收到任何 token）');
+    const hint = thinkFilter.thinkingChars > 0
+      ? '推理模型把全部 token 用在了思维链上，请提高「最大 token 数」后重试'
+      : '上游返回了空内容（未收到任何 token）';
+    throw new Error(hint);
   }
-  return { content, provider: 'openai', model, usage: {} };
+  return { content, provider: 'openai', model, usage: {}, reasoningChars: thinkFilter.thinkingChars };
 }
 
 async function readSse(res, onData) {
