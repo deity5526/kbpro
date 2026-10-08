@@ -4,6 +4,7 @@
  */
 import { icon, hasIcon } from './icons.js';
 import { escapeHtml, fileKind, fileKindLabel, extBadge, initials, colorFor } from './format.js';
+import { placeMenu, shouldDismissOnScroll } from './menu-position.js';
 
 export const esc = escapeHtml;
 
@@ -343,26 +344,39 @@ export function dropdown(anchor, items, { align = 'end', width = null } = {}) {
   const rect = anchor.getBoundingClientRect();
   const mw = menu.offsetWidth;
   const mh = menu.offsetHeight;
-  let left = align === 'end' ? rect.right - mw : rect.left;
-  left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
-  let top = rect.bottom + 6;
-  if (top + mh > window.innerHeight - 8) {
-    top = Math.max(8, rect.top - mh - 6);
-  }
+
+  // 视口尺寸用 clientWidth/clientHeight 而不是 innerWidth/innerHeight：
+  // 后者包含滚动条宽度，会把菜单压到列表滚动条上。
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+
+  const { left, top, maxHeight } = placeMenu(
+    { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
+    mw, mh,
+    { viewportWidth: vw, viewportHeight: vh, align }
+  );
+  // 先收敛 max-height 再落位：菜单优先完整展示，实在放不下才内部滚动。
+  menu.style.maxHeight = `${maxHeight}px`;
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
+
+  const onScroll = (e) => {
+    // 菜单自身的内部滚动不关闭菜单（见 menu-position.js 的说明）。
+    if (!shouldDismissOnScroll(menu, e.target)) return;
+    close();
+  };
 
   const close = () => {
     menu.remove();
     document.removeEventListener('mousedown', onOutside, true);
-    window.removeEventListener('scroll', close, true);
+    window.removeEventListener('scroll', onScroll, true);
     window.removeEventListener('resize', close);
     activeDropdown = null;
   };
   const onOutside = (e) => { if (!menu.contains(e.target) && e.target !== anchor) close(); };
   setTimeout(() => {
     document.addEventListener('mousedown', onOutside, true);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', close);
   }, 0);
 

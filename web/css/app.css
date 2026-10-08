@@ -690,7 +690,12 @@ mark, .hl {
   background: var(--c-surface); border: 1px solid var(--c-border);
   border-radius: var(--r-lg); box-shadow: var(--sh-3);
   animation: popIn var(--dur-2) var(--ease-out);
-  max-height: 380px; overflow-y: auto;
+  /* 这里只是兜底值：dropdown() 会按锚点上下实际剩余空间再收敛一次 max-height。
+     取值要足够大，否则量到的自然高度会被截断，翻转判断跟着出错。 */
+  max-height: min(560px, calc(100vh - 24px));
+  overflow-y: auto;
+  /* 菜单滚到底之后不要再把滚动传给后面的列表（否则列表一动菜单就被关掉） */
+  overscroll-behavior: contain;
 }
 @keyframes popIn { from { opacity: 0; transform: translateY(-4px) scale(.985) } to { opacity: 1; transform: none } }
 .menu-item {

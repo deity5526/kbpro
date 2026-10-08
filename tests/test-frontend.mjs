@@ -493,6 +493,104 @@ head('图标尺寸 · 未指定尺寸时不得退化成 300×150');
   check(/\.general-notice-ico\s+svg\s*\{[^}]*width/.test(css), '提示图标容器显式约束了 svg 尺寸');
 }
 
+/* ------------------------------------------------------------------ 13. 浮层菜单 */
+
+head('浮层菜单 · 条目多时不得被截断，且滚动菜单不能把自己关掉');
+{
+  const menuPos = await import(url.pathToFileURL(path.join(JS_DIR, 'menu-position.js')).href);
+  const { placeMenu, shouldDismissOnScroll, MENU_GAP, MENU_PAD, MENU_MIN_HEIGHT } = menuPos;
+
+  eq(typeof placeMenu, 'function', 'menu-position.js 导出 placeMenu');
+  eq(typeof shouldDismissOnScroll, 'function', 'menu-position.js 导出 shouldDismissOnScroll');
+  eq(MENU_GAP, 6, '锚点间距常量');
+  eq(MENU_PAD, 8, '视口安全距离常量');
+
+  const rect = (top, bottom, right, left = right - 26) => ({ top, bottom, left, right });
+
+  /* --- 曾经的真实故障：文件操作菜单 14 项 ≈ 470px，被 max-height:380px 截断 --- */
+
+  // 复现用户截图里的场景：窗口高 900，菜单挂在列表第一行的「更多」按钮上
+  const tall = 470;
+  const firstRow = rect(110, 145, 1600);
+  const a = placeMenu(firstRow, 226, tall, { viewportWidth: 1706, viewportHeight: 900, align: 'end' });
+  eq(a.placedAbove, false, '首行菜单在锚点下方展开');
+  eq(a.top, firstRow.bottom + MENU_GAP, '紧贴锚点下沿');
+  check(a.maxHeight >= tall, `下方空间足够时不再截断菜单（maxHeight=${a.maxHeight} ≥ ${tall}）`, a);
+  check(a.left + 226 <= 1706 - MENU_PAD, '菜单右边缘不越过安全距离（不压住列表滚动条）', a.left);
+
+  /* --- 锚点在底部时向上翻转 --- */
+
+  const nearBottom = rect(840, 870, 1600);
+  const b = placeMenu(nearBottom, 226, tall, { viewportWidth: 1706, viewportHeight: 900, align: 'end' });
+  eq(b.placedAbove, true, '底部锚点改为向上展开');
+  eq(b.top + Math.min(tall, b.maxHeight), nearBottom.top - MENU_GAP, '向上展开时菜单底边贴住锚点上沿');
+  check(b.top >= MENU_PAD, '向上展开后不会越过视口上边缘', b.top);
+
+  /* --- 两边都放不下：收敛到较大的一侧，仍然可滚动（而不是溢出） --- */
+
+  const tiny = rect(190, 210, 600);
+  const c = placeMenu(tiny, 226, 900, { viewportWidth: 1024, viewportHeight: 400, align: 'end' });
+  eq(c.placedAbove, false, '上下空间相同时保持在下方（更符合阅读方向）');
+  check(c.maxHeight <= 400 - 210 - MENU_GAP - MENU_PAD, 'max-height 收敛到可用高度，菜单不会溢出视口', c);
+  check(c.maxHeight >= MENU_MIN_HEIGHT, '极端情况下仍保留最小可滚动高度', c.maxHeight);
+  check(c.top + c.maxHeight <= 400, '下方展开时菜单底边不越出视口', c.top + c.maxHeight);
+
+  /* --- 水平方向：左右都要夹在安全区内 --- */
+
+  const leftAnchor = rect(100, 120, 60, 30);
+  const d = placeMenu(leftAnchor, 226, 200, { viewportWidth: 800, viewportHeight: 900, align: 'start' });
+  eq(d.left, 30, 'align=start 时左对齐锚点');
+  const rightAnchor = rect(100, 120, 810, 780);
+  const e2 = placeMenu(rightAnchor, 226, 200, { viewportWidth: 800, viewportHeight: 900, align: 'end' });
+  eq(e2.left, 800 - 226 - MENU_PAD, 'align=end 时右对齐并留出安全距离');
+
+  /* --- 锚点被滚出视口时，菜单必须被拉回可视区（否则像「点了没反应」） --- */
+
+  const offscreen = rect(960, 990, 600);   // 锚点在视口下方之外
+  const f = placeMenu(offscreen, 226, 470, { viewportWidth: 1024, viewportHeight: 900, align: 'end' });
+  check(f.top >= MENU_PAD, '锚点越界时菜单不会被推到视口上方之外', f);
+  check(f.top + Math.min(470, f.maxHeight) <= 900 || f.maxHeight >= 900 - 2 * MENU_PAD,
+    '锚点越界时菜单仍然落在可视区内（或已占满可用高度）', f);
+
+  /* --- 滚动策略：菜单自身滚动必须放行，其它滚动照旧关闭 --- */
+
+  const fakeMenu = { contains: (n) => n === 'inside' || n === 'self' };
+  eq(shouldDismissOnScroll(fakeMenu, 'self'), false, '菜单自身滚动不关闭菜单（否则被截断的条目永远点不到）');
+  eq(shouldDismissOnScroll(fakeMenu, 'inside'), false, '菜单内部元素触发的滚动同样不关闭');
+  eq(shouldDismissOnScroll(fakeMenu, 'files-scroll'), true, '文件列表滚动仍然关闭菜单（避免与锚点错位）');
+  eq(shouldDismissOnScroll(fakeMenu, null), true, '没有目标（页面级滚动）时关闭菜单');
+  eq(shouldDismissOnScroll(null, 'x'), true, '菜单缺失时不抛错并关闭');
+
+  /* --- 真实菜单确实很长：保证上面的前提不会随代码改动失效 --- */
+
+  const filesSrc = fs.readFileSync(path.join(JS_DIR, 'pages', 'files.js'), 'utf8');
+  const menuBlock = /function openFileMenu[\s\S]*?\n\}/.exec(filesSrc)?.[0] || '';
+  check(!!menuBlock, 'files.js 中存在 openFileMenu');
+  const itemCount = (menuBlock.match(/\{\s*(icon|sep)\s*:/g) || []).length;
+  check(itemCount >= 12, `文件操作菜单条目足够多（${itemCount} 项），必须依赖动态 max-height`, itemCount);
+
+  /* --- ui.js 必须真的用上了这套策略 --- */
+
+  const uiSrc = fs.readFileSync(path.join(JS_DIR, 'ui.js'), 'utf8');
+  check(uiSrc.includes("from './menu-position.js'"), 'ui.js 引入了 menu-position.js');
+  check(/window\.addEventListener\('scroll',\s*onScroll,\s*true\)/.test(uiSrc),
+    'window 上注册的是可判断来源的 onScroll（捕获阶段）');
+  check(!/window\.addEventListener\('scroll',\s*close,\s*true\)/.test(uiSrc),
+    '不再直接把 close 挂到 scroll 上（这正是「滚动菜单就消失」的根因）');
+  check(/window\.removeEventListener\('scroll',\s*onScroll,\s*true\)/.test(uiSrc), '关闭时正确移除该监听');
+  check(/menu\.style\.maxHeight/.test(uiSrc), 'ui.js 会按可用空间设置 max-height');
+  check(/document\.documentElement\.clientWidth/.test(uiSrc), '用 clientWidth 计算边界（排除滚动条宽度）');
+
+  /* --- CSS 兜底值不能再把菜单截断 --- */
+
+  const css = fs.readFileSync(path.join(WEB, 'css', 'app.css'), 'utf8');
+  const dropdownBlock = /\.dropdown\s*\{[\s\S]*?\}/.exec(css)?.[0] || '';
+  check(!!dropdownBlock, 'app.css 中存在 .dropdown 规则');
+  check(!/max-height:\s*380px/.test(dropdownBlock), '.dropdown 不再写死 max-height:380px');
+  check(/max-height:\s*min\(\s*560px/.test(dropdownBlock), '.dropdown 兜底高度已放宽到 560px', dropdownBlock.match(/max-height:[^;]*/)?.[0]);
+  check(/overscroll-behavior:\s*contain/.test(dropdownBlock), '.dropdown 阻止滚动链传给背后的列表');
+}
+
 /* ------------------------------------------------------------------ 汇总 */
 
 console.log('\n' + '─'.repeat(64));
