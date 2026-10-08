@@ -132,7 +132,9 @@ export function registerAiRoutes(router) {
       return sendJson(res, 200, {
         ok: true, chatId, answer: result.content, citations: result.citations,
         provider: result.provider, model: result.model, fallback: result.fallback,
-        general: !!result.general, error: result.error || '', ms: result.ms, contexts: result.contexts.map(publicContext)
+        general: !!result.general, noContext: !!result.noContext,
+        interrupted: !!result.interrupted, error: result.error || '',
+        ms: result.ms, contexts: result.contexts.map(publicContext)
       });
     }
 
@@ -170,7 +172,9 @@ export function registerAiRoutes(router) {
         chatId, messageId: saved.id,
         citations: result.citations?.length ? result.citations : citations,
         provider: result.provider, model: result.model,
-        fallback: !!result.fallback, general: !!result.general, error: result.error || '', ms: result.ms
+        fallback: !!result.fallback, general: !!result.general,
+        noContext: !!result.noContext, interrupted: !!result.interrupted,
+        error: result.error || '', ms: result.ms
       });
       publishWorkspace(chat.workspace_id, { type: 'chat.updated', chatId });
     } catch (err) {
