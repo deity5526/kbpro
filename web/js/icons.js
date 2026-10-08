@@ -110,17 +110,25 @@ const P = {
 
 export const ICON_NAMES = Object.keys(P);
 
+/** 未显式指定尺寸时的默认图标边长（px） */
+export const DEFAULT_ICON_SIZE = 16;
+
 /**
  * 生成内联 SVG 图标。
+ *
+ * 尺寸**必须**总是写出：app.css 没有全局 svg 尺寸规则，若不写 width/height，
+ * 浏览器会按替换元素默认尺寸（300×150）渲染——放在 flex 行里就会变成一个巨大的图标。
+ * 需要交给 CSS 控制的场景不受影响：CSS 的 width/height 优先级高于这两个表现属性。
+ *
  * @param {string} name
- * @param {number|string} [size]
+ * @param {number|string} [size] 边长，默认 16
  * @param {string} [cls]
  */
-export function icon(name, size, cls = '') {
+export function icon(name, size = DEFAULT_ICON_SIZE, cls = '') {
   const d = P[name] || P.file;
-  const s = size ? ` width="${size}" height="${size}"` : '';
+  const px = size || DEFAULT_ICON_SIZE;
   const c = cls ? ` class="${cls}"` : '';
-  return `<svg${s}${c} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  return `<svg width="${px}" height="${px}"${c} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
 export function hasIcon(name) {

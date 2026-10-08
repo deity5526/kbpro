@@ -449,6 +449,50 @@ head('参考来源 · 折叠行为与标记');
   }
 }
 
+/* ------------------------------------------------------------------ 12. 图标尺寸 */
+
+head('图标尺寸 · 未指定尺寸时不得退化成 300×150');
+{
+  const iconsMod = await import(url.pathToFileURL(path.join(JS_DIR, 'icons.js')).href);
+  const { icon, ICON_NAMES, DEFAULT_ICON_SIZE } = iconsMod;
+
+  eq(typeof DEFAULT_ICON_SIZE, 'number', 'icons.js 导出默认尺寸常量');
+
+  // 根因：app.css 没有全局 svg 尺寸规则，SVG 不写 width/height 会按替换元素
+  // 默认尺寸 300×150 渲染，放在 flex 行里就是一个巨大图标（曾真实发生）。
+  const noSize = icon('alert');
+  check(/width="\d+"/.test(noSize) && /height="\d+"/.test(noSize),
+    'icon() 不带尺寸参数时仍会写出 width/height', noSize.slice(0, 60));
+  check(noSize.includes(`width="${DEFAULT_ICON_SIZE}"`), `默认尺寸为 ${DEFAULT_ICON_SIZE}px`);
+
+  check(icon('alert', 14).includes('width="14"'), '显式尺寸被采用');
+  check(icon('alert', '1em').includes('width="1em"'), '支持 em 等字符串尺寸');
+  check(icon('alert', null).includes(`width="${DEFAULT_ICON_SIZE}"`), '传入 null 时回退默认尺寸');
+  check(icon('alert', 0).includes(`width="${DEFAULT_ICON_SIZE}"`), '传入 0 时回退默认尺寸');
+
+  // 全量扫描：任何一个图标都不允许缺尺寸
+  const missing = [];
+  for (const name of ICON_NAMES) {
+    const svg = icon(name);
+    if (!/width="[^"]+"/.test(svg) || !/height="[^"]+"/.test(svg)) missing.push(name);
+  }
+  check(missing.length === 0, `全部 ${ICON_NAMES.length} 个图标都带默认尺寸`, missing.slice(0, 8));
+
+  // 「未引用知识库」提示：必须用固定小尺寸，且样式走 CSS 类而不是内联
+  const chatSrc = fs.readFileSync(path.join(JS_DIR, 'pages', 'chat.js'), 'utf8');
+  const noticeBlock = /function generalNoticeHtml[\s\S]*?\n}/.exec(chatSrc)?.[0] || '';
+  check(!!noticeBlock, 'chat.js 中存在 generalNoticeHtml');
+  check(/icon\('alert',\s*\d+\)/.test(noticeBlock), '提示里的图标显式指定了小尺寸', noticeBlock.match(/icon\('alert'[^)]*\)/)?.[0]);
+  check(noticeBlock.includes('general-notice-ico'), '提示图标有独立的尺寸容器类');
+  check(!/icon\('alert'\)/.test(noticeBlock), '提示里不存在未指定尺寸的图标调用');
+
+  const css = fs.readFileSync(path.join(WEB, 'css', 'app.css'), 'utf8');
+  for (const cls of ['.general-notice', '.general-notice-ico', '.general-notice-title', '.general-notice-desc']) {
+    check(css.includes(cls), `app.css 定义了 ${cls}`);
+  }
+  check(/\.general-notice-ico\s+svg\s*\{[^}]*width/.test(css), '提示图标容器显式约束了 svg 尺寸');
+}
+
 /* ------------------------------------------------------------------ 汇总 */
 
 console.log('\n' + '─'.repeat(64));

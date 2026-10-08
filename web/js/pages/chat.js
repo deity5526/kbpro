@@ -704,12 +704,11 @@ function generalNoticeHtml(m) {
   if (!m.content) return '';
   // 本地抽取式引擎不可能越过知识库作答，普通「暂无依据」提示无需再加徽章
   if (m.noContext && !m.general) return '';
-  return `<div class="card" style="margin-bottom:10px;padding:9px 12px;border-color:var(--c-warn);background:var(--c-warn-bg)">
-    <div class="text-xs" style="color:var(--c-warn);font-weight:600;display:flex;align-items:center;gap:6px">
-      ${icon('alert')} 以下为通用回答 · 未引用你的知识库
-    </div>
-    <div class="text-xs mt-1" style="color:var(--c-text-2);line-height:1.65">
-      知识库中没有检索到相关依据，该内容来自大模型的通用知识，请自行核实。
+  return `<div class="general-notice">
+    <span class="general-notice-ico">${icon('alert', 14)}</span>
+    <div class="general-notice-body">
+      <div class="general-notice-title">以下为通用回答 · 未引用你的知识库</div>
+      <div class="general-notice-desc">知识库中没有检索到相关依据，该内容来自大模型的通用知识，请自行核实。</div>
     </div>
   </div>`;
 }
