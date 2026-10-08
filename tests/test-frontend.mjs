@@ -37,6 +37,9 @@ function check(cond, label, detail) {
   }
 }
 function warn(msg) { console.log(`  \x1b[33m•\x1b[0m ${msg}`); }
+function eq(actual, expected, label) {
+  check(actual === expected, label, actual === expected ? undefined : { actual, expected });
+}
 
 /* ------------------------------------------------------------------ 文件发现 */
 
@@ -378,6 +381,72 @@ head('静态资源 · web 目录清单');
   check(files.length >= 12, `web/js 下共 ${files.length} 个模块`);
   const totalBytes = files.reduce((s, f) => s + fs.statSync(f).size, 0) + (css ? fs.statSync(path.join(WEB, 'css', 'app.css')).size : 0);
   check(totalBytes > 100000, `前端代码总量 ${(totalBytes / 1024).toFixed(0)} KB`);
+}
+
+/* ------------------------------------------------------------------ 11. 引用折叠 */
+
+head('参考来源 · 折叠行为与标记');
+{
+  let citations = null;
+  try {
+    citations = await import(url.pathToFileURL(path.join(JS_DIR, 'citations.js')).href);
+  } catch (err) {
+    check(false, 'citations.js 可导入', err.message);
+  }
+
+  if (citations) {
+    const sample = [
+      { index: 1, fileId: 'f1', title: '季度经营复盘会议纪要.docx', page: 2, heading: '经营数据', score: 3.739, snippet: '营业收入 3,280 万元' },
+      { index: 2, fileId: 'f2', title: '决议事项跟踪表.xlsx', score: 1.76, snippet: 'R-01 完成智能知识库商用版本发布' }
+    ];
+
+    // 没有来源时不渲染任何东西
+    eq(citations.citationsHtml({ citations: [] }), '', '无来源时不渲染参考来源区块');
+    eq(citations.citationsHtml({}), '', '缺少 citations 字段时不渲染');
+    eq(citations.citationsHtml(null), '', '传入 null 不抛错');
+    eq(citations.citationsHtml({ citations: [null, undefined] }), '', '来源全为空值时不渲染');
+
+    // 默认折叠
+    const collapsed = citations.citationsHtml({ citations: sample });
+    check(collapsed.includes('data-cites-toggle="1"'), '包含折叠开关');
+    check(collapsed.includes('aria-expanded="false"'), '默认 aria-expanded=false（可访问性）');
+    check(collapsed.includes('class="citations-list" hidden'), '默认列表带 hidden 属性（真正收起）');
+    check(!collapsed.includes('class="citations is-open"'), '默认不带 is-open 类');
+    check(collapsed.includes('<span class="citations-count">2</span>'), '收起态显示来源条数', collapsed.match(/citations-count">[^<]*/)?.[0]);
+    check(collapsed.includes('参考来源'), '收起态显示「参考来源」标题');
+    check(collapsed.includes('citations-caret'), '收起态显示展开箭头');
+
+    // 展开态
+    const opened = citations.citationsHtml({ citations: sample, citesOpen: true });
+    check(opened.includes('aria-expanded="true"'), '展开后 aria-expanded=true');
+    // 注意：图标 svg 自带 aria-hidden，不能用 includes('hidden') 粗判
+    check(!/class="citations-list"\s+hidden/.test(opened), '展开后列表不再有 hidden 属性');
+    check(opened.includes('class="citations is-open"'), '展开后带 is-open 类（箭头翻转）');
+
+    // 两种状态下来源卡片本身都要保留（角标定位依赖它）
+    for (const [label, html] of [['折叠态', collapsed], ['展开态', opened]]) {
+      check(html.includes('data-cite-card="1"') && html.includes('data-cite-card="2"'),
+        `${label}保留全部来源卡片（供角标定位）`);
+      check(html.includes('data-cite-file="f1"'), `${label}卡片携带文件 id（可跳转原文）`);
+      check(html.includes('第 2 页') && html.includes('经营数据'), `${label}卡片显示页码与章节`);
+      check(html.includes('3.739'), `${label}卡片显示相关性分数`);
+    }
+
+    // 转义：标题里的 HTML 不能穿透
+    const dirty = citations.citationsHtml({
+      citations: [{ index: 1, title: '<img src=x onerror=alert(1)>', snippet: '<script>bad()</script>' }]
+    });
+    check(!dirty.includes('<img') && !dirty.includes('<script'), '来源标题与片段被转义，不会注入 HTML', dirty.slice(0, 160));
+    check(dirty.includes('&lt;img') || dirty.includes('&lt;script'), '恶意内容以实体形式呈现');
+  }
+
+  // CSS 必须真的定义了这些类，否则折叠在视觉上不成立
+  {
+    const css = fs.readFileSync(path.join(WEB, 'css', 'app.css'), 'utf8');
+    for (const cls of ['.citations-head', '.citations-count', '.citations-caret', '.citations-list', '.citations.is-open .citations-caret']) {
+      check(css.includes(cls), `app.css 定义了 ${cls}`);
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ 汇总 */

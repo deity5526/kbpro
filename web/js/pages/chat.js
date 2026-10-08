@@ -11,6 +11,7 @@ import {
   formatBytes, initials, fileIconHtml, skeleton
 } from '../ui.js';
 import { renderChatMarkdown } from '../md.js';
+import { citationsHtml, citeCardHtml } from '../citations.js';
 
 export const meta = { title: '智能问答', icon: 'sparkle' };
 
@@ -149,6 +150,19 @@ export async function mount(container, ctx) {
     send(node.getAttribute('data-prompt'));
   }));
 
+  // 展开 / 收起参考来源
+  cleanups.push(on(container, 'click', '[data-cites-toggle]', (e, node) => {
+    const msgNode = node.closest('[data-msg]');
+    const m = findMessage(msgNode?.getAttribute('data-msg'));
+    if (!m) return;
+    m.citesOpen = !(m.citesOpen === true);
+    updateRegion(m, 'cites');
+    // 展开后内容变长，把标题拉回视野，避免"点了但看不到展开的内容"
+    if (m.citesOpen) {
+      qs('[data-cites] .citations-head', msgNode)?.scrollIntoView({ block: 'nearest' });
+    }
+  }));
+
   cleanups.push(on(container, 'click', '.cite-card', (e, node) => {
     const fileId = node.getAttribute('data-cite-file');
     if (fileId) ctx.navigate('files', [], { open: fileId });
@@ -157,6 +171,13 @@ export async function mount(container, ctx) {
   cleanups.push(on(container, 'click', '.cite-ref', (e, node) => {
     const num = node.getAttribute('data-cite');
     const scope = node.closest('.msg') || container;
+    const msgNode = node.closest('[data-msg]');
+    const m = msgNode ? findMessage(msgNode.getAttribute('data-msg')) : null;
+    // 角标指向的来源可能正收起着：先展开再定位
+    if (m && m.citesOpen !== true && Array.isArray(m.citations) && m.citations.length) {
+      m.citesOpen = true;
+      updateRegion(m, 'cites');
+    }
     const card = num ? qs(`.cite-card[data-cite-card="${num}"]`, scope) : null;
     if (!card) { notify.info('未找到对应的引用来源'); return; }
     card.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -667,7 +688,7 @@ function assistantBodyHtml(m) {
     ${generalNoticeHtml(m)}
     <div class="msg-content${blink}">${contentHtml}${typing}${error}</div>
     <div data-tools>${toolsHtml(m)}</div>
-    <div data-cites>${citationsHtml(m.citations)}</div>`;
+    <div data-cites>${citationsHtml(m)}</div>`;
 }
 
 /**
@@ -713,29 +734,10 @@ function errorCardHtml(m) {
   </div>`;
 }
 
-function citationsHtml(citations) {
-  const list = Array.isArray(citations) ? citations.filter(Boolean) : [];
-  if (!list.length) return '';
-  return `<div class="citations">
-    <div class="citations-head">${icon('book')} 参考来源 · ${list.length} 条</div>
-    ${list.map(citeCardHtml).join('')}
-  </div>`;
-}
-
-function citeCardHtml(c, i) {
-  const num = Number(c.index) || i + 1;
-  const fileId = c.fileId || c.file_id || '';
-  const score = Number(c.score);
-  const meta = [c.page ? `第 ${c.page} 页` : '', c.heading || ''].filter(Boolean).join(' · ');
-  return `<div class="cite-card" data-cite-card="${num}" data-cite-file="${esc(fileId)}" title="点击打开原文">
-    <span class="cite-num">${num}</span>
-    <div class="cite-main">
-      <div class="cite-title">${esc(c.title || '未命名文档')}${meta ? ` · ${esc(meta)}` : ''}</div>
-      <div class="cite-snippet">${esc(c.snippet || '')}</div>
-    </div>
-    ${Number.isFinite(score) && score > 0 ? `<span class="cite-score">${score.toFixed(3)}</span>` : ''}
-  </div>`;
-}
+/**
+ * 参考来源的渲染已抽到 ../citations.js（纯字符串构建，可在 Node 中单测）。
+ * 这里只管折叠交互：默认收起，点标题展开；正文 [1] 角标会自动展开后再定位。
+ */
 
 function refreshMessage(m) {
   if (!S || !m || m.role === 'user') return;
@@ -751,7 +753,7 @@ function updateRegion(m, region) {
   if (!node) return;
   const host = qs(`[data-${region}]`, node);
   if (!host) return;
-  host.innerHTML = region === 'tools' ? toolsHtml(m) : citationsHtml(m.citations);
+  host.innerHTML = region === 'tools' ? toolsHtml(m) : citationsHtml(m);
 }
 
 function appendMessageNode(m) {

@@ -1166,8 +1166,35 @@ mark, .hl {
 .msg:hover .msg-tools { opacity: 1; }
 .msg-tools .btn { height: 24px; padding: 0 8px; font-size: var(--fs-xs); color: var(--c-text-3); }
 
-.citations { margin-top: var(--sp-4); border-top: 1px dashed var(--c-border); padding-top: var(--sp-4); }
-.citations-head { font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-3); margin-bottom: 9px; display: flex; align-items: center; gap: 6px; letter-spacing: .02em; }
+.citations { margin-top: var(--sp-4); border-top: 1px dashed var(--c-border); padding-top: var(--sp-3); }
+
+/* 参考来源折叠头：收起态只占一行，避免把回答挤下去 */
+.citations-head {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 5px 6px; margin: 0 -6px;
+  border: 0; background: transparent; border-radius: var(--r-sm);
+  font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-3);
+  letter-spacing: .02em; text-align: left; cursor: pointer;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.citations-head:hover { background: var(--c-ink-50); color: var(--c-text-2); }
+.citations-head-ico { width: 13px; height: 13px; flex: none; display: grid; place-items: center; }
+.citations-head-ico svg { width: 100%; height: 100%; }
+.citations-head-text { flex: none; }
+.citations-count {
+  flex: none; padding: 0 6px; line-height: 16px; border-radius: var(--r-full);
+  background: var(--c-ink-100); color: var(--c-ink-600);
+  font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.citations-caret {
+  margin-left: auto; width: 13px; height: 13px; flex: none;
+  color: var(--c-ink-400); display: grid; place-items: center;
+  transition: transform var(--dur-2) var(--ease);
+}
+.citations-caret svg { width: 100%; height: 100%; }
+.citations.is-open .citations-caret { transform: rotate(180deg); }
+.citations-list { margin-top: 9px; animation: citeExpand var(--dur-2) var(--ease-out); }
+@keyframes citeExpand { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 .cite-card {
   display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--c-border);
   border-radius: var(--r-md); margin-bottom: 6px; cursor: pointer; background: var(--c-surface);
