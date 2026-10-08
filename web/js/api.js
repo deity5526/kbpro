@@ -26,6 +26,16 @@ async function request(method, path, { body, formData, signal, raw = false, head
     if (err?.name === 'AbortError') throw err;
     throw new ApiError(0, '网络连接失败，请检查服务是否运行', null);
   }
+
+  // 会话失效（例如在别处改了密码、或管理员重置了会话）：通知应用壳回到登录页，
+  // 否则用户只会在各个页面反复看到「未登录或会话已过期」的提示却无从操作。
+  // 登录/注册接口本身的 401 是「密码错误」，不属于会话失效，必须排除。
+  if (res.status === 401 && !/\/api\/auth\/(login|register)$/.test(path)) {
+    try {
+      window.dispatchEvent(new CustomEvent('kbpro:unauthorized', { detail: { path } }));
+    } catch { /* 忽略 */ }
+  }
+
   if (raw) {
     if (!res.ok) throw new ApiError(res.status, `请求失败（${res.status}）`, null);
     return res;

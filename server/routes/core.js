@@ -16,7 +16,7 @@ import {
 } from '../lib/tags.js';
 import { workspaceTags, renameTag, deleteTag, cleanupOrphanTags } from '../lib/tags.js';
 import { normalizeTags } from '../lib/text.js';
-import { probeAi, probeAiConfig, resolveAiConfig } from '../lib/ai.js';
+import { probeAi, probeAiConfig, resolveAiConfig, assertSafeAiBaseUrlAsync, baseUrlPolicy } from '../lib/ai.js';
 
 /* ------------------------------------------------------------------ 校验工具 */
 
@@ -169,6 +169,11 @@ export function registerCoreRoutes(router) {
       && !/^https?:\/\//i.test(String(baseUrl).trim())) {
       throw httpError(400, 'Base URL 必须以 http:// 或 https:// 开头');
     }
+    // SSRF 防护：Base URL 指向哪里，服务端就会去请求哪里，必须在这里拦下来
+    if (baseUrl) {
+      const verdict = await assertSafeAiBaseUrlAsync(String(baseUrl).trim(), baseUrlPolicy());
+      if (!verdict.ok) throw httpError(400, verdict.reason);
+    }
     // 以「已保存配置」为底，表单值覆盖；密钥留空则沿用已保存的
     const effectiveUser = {
       ai_provider: provider ?? user.ai_provider,
@@ -176,6 +181,11 @@ export function registerCoreRoutes(router) {
       ai_base_url: baseUrl ?? user.ai_base_url,
       ai_key_enc: apiKey ? encryptText(String(apiKey).slice(0, 500)) : user.ai_key_enc
     };
+    // 表单未提供 baseUrl 时，也要校验已保存的值
+    if (!baseUrl && effectiveUser.ai_base_url) {
+      const verdict = await assertSafeAiBaseUrlAsync(String(effectiveUser.ai_base_url).trim(), baseUrlPolicy());
+      if (!verdict.ok) throw httpError(400, verdict.reason);
+    }
     const conf = resolveAiConfig(effectiveUser);
     const status = await probeAiConfig(conf);
     sendJson(res, 200, { ok: true, status });
@@ -194,6 +204,11 @@ export function registerCoreRoutes(router) {
     if (baseUrl !== undefined) {
       const u = str(baseUrl, '', 300).trim();
       if (u && !/^https?:\/\//i.test(u)) throw httpError(400, 'Base URL 必须以 http(s):// 开头');
+      // SSRF 防护：保存下来的地址会在后续每次对话时由服务端发起请求
+      if (u) {
+        const verdict = await assertSafeAiBaseUrlAsync(u, baseUrlPolicy());
+        if (!verdict.ok) throw httpError(400, verdict.reason);
+      }
       patch.ai_base_url = u;
     }
     if (clearKey) patch.ai_key_enc = '';

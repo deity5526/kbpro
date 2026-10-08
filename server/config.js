@@ -56,7 +56,17 @@ export const DEFAULTS = {
     /** 思考型模型（如 deepseek-flash / deepseek-reasoner）：true 始终开，false 从不，null 自动 */
     thinking: null,
     /** 思考强度：low | medium | high（留空则思考型模型默认 high） */
-    reasoningEffort: ''
+    reasoningEffort: '',
+    /**
+     * AI Base URL 安全策略。
+     * 用户可以自定义 Base URL，而请求由**服务端**发出，因此必须防止被当作 SSRF 跳板。
+     * 云厂商元数据地址与链路本地地址**始终拒绝**；回环与私有网段默认放行，
+     * 因为「指向本机/内网的 vLLM、one-api 等自建推理服务」是常见且合法的用法。
+     */
+    allowLoopbackBaseUrl: true,
+    allowPrivateBaseUrl: true,
+    /** 非空时，Base URL 主机必须命中该白名单（加固部署推荐配置） */
+    allowedBaseUrlHosts: []
   },
   /** 默认演示账号，仅在数据库为空时创建 */
   bootstrap: {

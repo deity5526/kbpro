@@ -260,11 +260,36 @@ BM25 打分直接用 SQL 取倒排链，无需启动时重建内存索引，进�
 | `KBPRO_AI_API_KEY` | – | 接口密钥 |
 | `KBPRO_AI_MODEL` | – | 对话模型名 |
 | `KBPRO_AI_EMBED_MODEL` | – | 嵌入模型名 |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | 本地 Ollama 地址 |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama 地址（会自动归一化，见下） |
+| `KBPRO_OLLAMA_URL` | – | Ollama 地址（优先于 `OLLAMA_HOST`） |
 | `KBPRO_TEST_LOGIN` | – | **仅测试用**，启用后开放免密测试登录接口 |
+
+> `OLLAMA_HOST` 在 Ollama 自身语义里是**服务端监听地址**（常见为 `0.0.0.0`），并不是
+> 客户端连接 URL。KBPRO 会自动归一化：`0.0.0.0` / `::` / `localhost` → `127.0.0.1`，
+> 缺协议补 `http://`，`http` 缺端口补 `11434`，`https` 不强加端口。
 
 `data/config.json` 可配置项（含上传上限、会话天数、分块大小、RAG 召回数量、AI 全局默认值等）
 可在「系统管理 → 实例设置」中图形化调整。
+
+### AI Base URL 安全策略（SSRF 防护）
+
+AI Base URL 可由用户自定义，而请求是由**服务端**发出的，因此 KBPRO 内置了 SSRF 防护：
+
+- **始终拒绝**：云厂商元数据地址（`169.254.169.254`、`fd00:ec2::254`、`100.100.100.200`、
+  `metadata.google.internal` 等）、链路本地 / 组播 / 保留网段、非 `http(s)` 协议
+- **域名解析校验**：同时解析域名并检查解析结果，防止「域名指向内网」的绕过
+- **默认放行回环与私有网段**：因为「指向本机 / 内网的 vLLM、one-api 等自建推理服务」是常见且合法的用法
+- 加固部署可关闭默认放行并配置主机白名单：
+
+```json
+{
+  "ai": {
+    "allowLoopbackBaseUrl": false,
+    "allowPrivateBaseUrl": false,
+    "allowedBaseUrlHosts": ["api.deepseek.com", "llm.corp.internal"]
+  }
+}
+```
 
 ---
 
@@ -373,11 +398,16 @@ node tests/run-all.mjs --full   # 追加 PDF / Office 解析器单测
 | 套件 | 命令 | 覆盖 |
 |---|---|---|
 | 前端契约审计 | `node tests/test-frontend.mjs` | 语法、页面契约、289 处 import、345 处图标、181 处 API 调用、路由、CSS |
-| 后端 API 端到端 | `node tests/test-api.mjs` | 认证、隔离、权限、文件夹、上传、检索、笔记版本、RAG、备份、审计 |
+| 后端 API 端到端 | `node tests/test-api.mjs` | 认证、隔离、权限、文件夹、上传、检索、笔记版本、RAG、存储配额、备份、审计 |
 | 多格式解析 | `node tests/test-formats.mjs` | 22 种 PDF 场景 + DOCX/XLSX/PPTX + 文本族 + 分块 + 批量 |
+| 大模型容错与安全 | `node tests/test-ai-fallback.mjs` | 流中断、SSE 错误负载、thinking 参数重试、通用回答标记、SSRF 防护 |
 | Office 解析单测 | `node tests/test-officedoc.mjs` | zip 读写、OOXML 转换、XSS 转义、畸形输入、位翻转模糊 |
 | PDF 解析单测 | `node tests/test-pdf.mjs` | 6 种过滤器、ToUnicode、加密、损坏恢复、敌对输入 |
 | 浏览器渲染 | `node tests/test-browser.mjs` | 无头 Chromium 渲染全部路由，校验无崩溃、无控制台异常 |
+
+> `test-ai-fallback.mjs` 使用**内置的假 OpenAI 兼容上游**，无需任何真实 API Key 即可
+> 稳定复现上游各类异常：流到一半断开、SSE 中回吐 error 负载、拒绝 `thinking` 参数、
+> 无视 `stream` 参数等。
 
 > 浏览器套件需要 Chromium 内核（Chrome / Edge）。若运行环境禁止浏览器所需的
 > 命名管道 IPC，该套件会明确报告 **SKIP** 而不是假装通过。

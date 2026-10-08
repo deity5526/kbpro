@@ -374,6 +374,13 @@ export const SYSTEM_PROMPT = `你是「KBPRO 智能知识库」的问答助手�
 5. 遇到专业术语保持原文表述，不要擅自改写专有名词。
 6. 不要提及"知识片段""上下文"等实现细节，直接给出面向用户的答案。`;
 
+/** 知识库未检索到依据时，改用通用知识回答的系统提示词 */
+export const GENERAL_SYSTEM_PROMPT = `你是 KBPRO 智能助手。当前知识库中没有检索到与该问题相关的资料，因此请基于你的通用知识直接回答用户。要求：
+1. 回答准确、简洁、有条理，使用 Markdown；
+2. 不得伪造引用，也不要声称内容来自知识库；
+3. 用一句话在开头说明「以下为通用回答，未引用知识库资料」；
+4. 若涉及实时、私有或你无法确认的信息，请如实说明不确定。`;
+
 /**
  * 构建带引用的 RAG 提示词。
  * @param {string} question
@@ -446,6 +453,15 @@ export async function askKnowledgeBase(p) {
     snippet: truncate(c.text, 260)
   }));
 
+  // 统一累积「实际发给用户的文本」。返回值必须与流式内容完全一致，
+  // 否则会出现「用户看到的」与「入库的」两份不同内容（例如降级时被替换掉半截输出）。
+  let streamed = '';
+  const emit = p.onToken
+    ? (t) => { if (t) { streamed += t; p.onToken(t); } }
+    : null;
+  /** 流式时以累积内容为准；非流式时用返回值 */
+  const reconcile = (result) => (emit ? (streamed || result.content || '') : (result.content || ''));
+
   if (!contexts.length) {
     // 未检索到知识库依据。
     // 若已配置大模型且开启 answerWithoutContext（默认开启），则用通用知识回答，
@@ -454,32 +470,47 @@ export async function askKnowledgeBase(p) {
     const allowGeneral = cfg.ai?.answerWithoutContext !== false;
     let conf = null;
     try { conf = resolveAiConfig(p.userRow); } catch { conf = null; }
+
     if (allowGeneral && conf && conf.provider !== 'local') {
-      const system = '你是 KBPRO 智能助手。当前知识库中没有检索到与该问题相关的资料，'
-        + '因此请基于你的通用知识直接回答用户。要求：\n'
-        + '1. 回答准确、简洁、有条理，使用 Markdown；\n'
-        + '2. 不得伪造引用，也不要声称内容来自知识库；\n'
-        + '3. 用一句话在开头说明「以下为通用回答，未引用知识库资料」；\n'
-        + '4. 若涉及实时、私有或你无法确认的信息，请如实说明不确定。';
       try {
         const result = await chatCompletion({
-          messages: [{ role: 'system', content: system }, { role: 'user', content: p.question }],
+          messages: [{ role: 'system', content: GENERAL_SYSTEM_PROMPT }, { role: 'user', content: p.question }],
           userRow: p.userRow,
-          stream: !!p.onToken,
-          onToken: p.onToken,
+          stream: !!emit,
+          onToken: emit || undefined,
           signal: p.signal
         });
-        if (!result.fallback) {
+        const content = reconcile(result);
+        if (content && !result.empty) {
           return {
-            content: result.content, citations: [], provider: result.provider, model: result.model,
-            fallback: false, error: '', contexts: [], ms: Date.now() - started, noContext: true, general: true
+            content, citations: [], provider: result.provider, model: result.model,
+            fallback: !!result.fallback, error: result.error || '',
+            interrupted: !!result.interrupted, contexts: [],
+            ms: Date.now() - started, noContext: true, general: !result.fallback
           };
         }
-      } catch { /* 通用回答失败，退回提示 */ }
+      } catch (err) {
+        if (p.signal?.aborted) throw err;
+        /* 通用回答彻底失败，落到下面的固定提示 */
+      }
+      // 已经吐过内容（例如中断说明）时，绝不能再追加第二段提示——
+      // 那会得到「半截大模型输出 + 提示」的前后拼接乱码。
+      if (streamed) {
+        return {
+          content: streamed, citations: [], provider: 'none', model: '',
+          fallback: true, error: '大模型调用失败', contexts: [],
+          ms: Date.now() - started, noContext: true, general: false
+        };
+      }
     }
+
     const content = '知识库中暂无与该问题相关的依据。\n\n**可能的原因：**\n- 相关文档尚未上传，或仍处于解析中\n- 当前所处的知识库（个人 / 团队）不包含该资料\n- 问题中的关键词与文档表述差异较大\n\n建议换用文档中出现过的关键词重试，或先上传相关资料。';
-    p.onToken?.(content);
-    return { content, citations: [], provider: 'none', model: '', fallback: false, error: '', contexts: [], ms: Date.now() - started, noContext: true };
+    emit?.(content);
+    return {
+      content, citations: [], provider: 'none', model: '',
+      fallback: false, error: '', contexts: [],
+      ms: Date.now() - started, noContext: true, general: false
+    };
   }
 
   const messages = buildRagMessages(p.question, contexts, p.history || []);
@@ -488,14 +519,14 @@ export async function askKnowledgeBase(p) {
     userRow: p.userRow,
     provider: p.provider,
     model: p.model,
-    stream: !!p.onToken,
-    onToken: p.onToken,
+    stream: !!emit,
+    onToken: emit || undefined,
     signal: p.signal,
     fallback: { question: p.question, contexts }
   });
 
   return {
-    content: result.content,
+    content: reconcile(result),
     citations,
     provider: result.provider,
     model: result.model,

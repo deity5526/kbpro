@@ -208,6 +208,12 @@ export function registerContentRoutes(router) {
     const created = [];
     const failed = [];
 
+    // 存储配额：此前只在前端展示、从未真正拦截。
+    // 以「已用 + 本次已接受」逐文件累计判断，超额的文件明确拒收并说明原因。
+    const quota = Number(user.storage_quota || 0);
+    let quotaUsed = Number(user.storage_used || 0);
+    const quotaLeft = () => (quota > 0 ? Math.max(0, quota - quotaUsed) : Infinity);
+
     for (const f of parsed.files) {
       try {
         if (f.size === 0) {
@@ -217,6 +223,14 @@ export function registerContentRoutes(router) {
         }
         if (f.size > cfg.maxUploadBytes) {
           failed.push({ filename: f.filename, error: `超过单文件上限 ${formatBytes(cfg.maxUploadBytes)}` });
+          await fsp.unlink(f.tmpPath).catch(() => {});
+          continue;
+        }
+        if (quota > 0 && quotaUsed + f.size > quota) {
+          failed.push({
+            filename: f.filename,
+            error: `超出存储配额（剩余 ${formatBytes(quotaLeft())}，该文件 ${formatBytes(f.size)}）`
+          });
           await fsp.unlink(f.tmpPath).catch(() => {});
           continue;
         }
@@ -253,6 +267,7 @@ export function registerContentRoutes(router) {
         });
         if (extraTags.length) syncTags(workspaceId, 'file', fileId, extraTags, user.id);
         run(`UPDATE users SET storage_used = storage_used + ? WHERE id=?`, saved.size, user.id);
+        quotaUsed += saved.size;
 
         audit({ workspaceId, userId: user.id, userName: user.name, action: 'file.upload', resourceType: 'file', resourceId: fileId, resourceName: name, detail: formatBytes(saved.size), ip: clientIp(req) });
         created.push(serializeFile(fileRow(fileId)));
@@ -286,6 +301,13 @@ export function registerContentRoutes(router) {
     let content = String(body.content ?? body.text ?? '');
     if (!content.trim()) throw httpError(400, '内容不能为空');
     if (content.length > 4 * 1024 * 1024) content = content.slice(0, 4 * 1024 * 1024);
+
+    // 存储配额：与上传路径一致，超额必须明确拒收
+    const quota = Number(user.storage_quota || 0);
+    const incoming = Buffer.byteLength(content, 'utf8');
+    if (quota > 0 && Number(user.storage_used || 0) + incoming > quota) {
+      throw httpError(413, `超出存储配额（剩余 ${formatBytes(Math.max(0, quota - Number(user.storage_used || 0)))}，本次需要 ${formatBytes(incoming)}）`);
+    }
 
     let folderId = body.folderId ? str(body.folderId, '', 80) : null;
     if (folderId) {

@@ -475,6 +475,9 @@ const REQUIRED_COLUMNS = [
   ['workspaces', 'color', `TEXT DEFAULT '#1F2937'`],
   ['chats', 'pinned', `INTEGER NOT NULL DEFAULT 0`],
   ['messages', 'feedback', `INTEGER NOT NULL DEFAULT 0`],
+  // 记录「该回答是否引用了知识库」等语义标记，否则刷新后「未引用知识库」的
+  // 警示会消失，用户会误以为通用回答来自自己的文档
+  ['messages', 'meta', `TEXT NOT NULL DEFAULT '{}'`],
   ['file_text', 'engine', `TEXT DEFAULT ''`],
   ['file_text', 'extract_ms', `INTEGER NOT NULL DEFAULT 0`],
   ['chunk_vectors', 'model', `TEXT NOT NULL DEFAULT 'local-hash-512'`]

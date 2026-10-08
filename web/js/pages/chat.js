@@ -508,6 +508,10 @@ function normalizeMessage(m) {
     citations: Array.isArray(m.citations) ? m.citations : [],
     feedback: Number(m.feedback) || 0,
     model: m.model || '',
+    // 该回答是否来自通用知识（未引用知识库）——刷新后也要保留警示
+    general: !!m.general,
+    noContext: !!m.noContext,
+    interrupted: !!m.interrupted,
     streaming: false,
     typing: false,
     error: false,
@@ -660,9 +664,33 @@ function assistantBodyHtml(m) {
   const blink = m.streaming && m.content ? ' cursor-blink' : '';
   const model = m.model ? ` · ${esc(m.model)}` : '';
   return `<div class="msg-role">KBPRO 智能助手${model}</div>
+    ${generalNoticeHtml(m)}
     <div class="msg-content${blink}">${contentHtml}${typing}${error}</div>
     <div data-tools>${toolsHtml(m)}</div>
     <div data-cites>${citationsHtml(m.citations)}</div>`;
+}
+
+/**
+ * 「未引用知识库」提示。
+ *
+ * 当知识库检索不到依据、而大模型用通用知识作答时，后端会带上 general=true。
+ * 必须在界面上明确标注——否则用户会误以为这段流畅的回答出自自己的文档，
+ * 这恰恰是知识库产品最不能含糊的地方。仅靠提示词要求模型自觉声明是不够的。
+ */
+function generalNoticeHtml(m) {
+  if (m.error) return '';
+  if (!m.general && !m.noContext) return '';
+  if (!m.content) return '';
+  // 本地抽取式引擎不可能越过知识库作答，普通「暂无依据」提示无需再加徽章
+  if (m.noContext && !m.general) return '';
+  return `<div class="card" style="margin-bottom:10px;padding:9px 12px;border-color:var(--c-warn);background:var(--c-warn-bg)">
+    <div class="text-xs" style="color:var(--c-warn);font-weight:600;display:flex;align-items:center;gap:6px">
+      ${icon('alert')} 以下为通用回答 · 未引用你的知识库
+    </div>
+    <div class="text-xs mt-1" style="color:var(--c-text-2);line-height:1.65">
+      知识库中没有检索到相关依据，该内容来自大模型的通用知识，请自行核实。
+    </div>
+  </div>`;
 }
 
 function toolsHtml(m) {
@@ -1010,6 +1038,10 @@ async function runAsk(question) {
         if (data?.messageId) asstMsg.id = data.messageId;
         if (data?.model) asstMsg.model = data.model;
         if (Array.isArray(data?.citations) && data.citations.length) asstMsg.citations = data.citations;
+        // 「未引用知识库 · 通用回答」标记：必须在界面上如实呈现
+        asstMsg.general = !!data?.general;
+        asstMsg.noContext = !!data?.noContext;
+        asstMsg.interrupted = !!data?.interrupted;
       },
       onError: (err) => { streamError = err?.message || '生成失败'; }
     });

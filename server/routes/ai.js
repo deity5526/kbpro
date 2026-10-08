@@ -199,12 +199,16 @@ export function registerAiRoutes(router) {
     const user = ctx.requireUser();
     const chat = get(`SELECT * FROM chats WHERE id=? AND user_id=?`, ctx.params.id, user.id);
     if (!chat) throw httpError(404, '会话不存在');
-    const messages = all(`SELECT * FROM messages WHERE chat_id=? ORDER BY created_at ASC`, chat.id).map((m) => ({
-      id: m.id, role: m.role, content: m.content,
-      citations: (() => { try { return JSON.parse(m.citations || '[]'); } catch { return []; } })(),
-      provider: m.provider, model: m.model, latencyMs: Number(m.latency_ms || 0),
-      feedback: Number(m.feedback || 0), createdAt: m.created_at
-    }));
+    const messages = all(`SELECT * FROM messages WHERE chat_id=? ORDER BY created_at ASC`, chat.id).map((m) => {
+      const meta = (() => { try { return JSON.parse(m.meta || '{}'); } catch { return {}; } })();
+      return {
+        id: m.id, role: m.role, content: m.content,
+        citations: (() => { try { return JSON.parse(m.citations || '[]'); } catch { return []; } })(),
+        provider: m.provider, model: m.model, latencyMs: Number(m.latency_ms || 0),
+        feedback: Number(m.feedback || 0), createdAt: m.created_at,
+        general: !!meta.general, noContext: !!meta.noContext, interrupted: !!meta.interrupted
+      };
+    });
     sendJson(res, 200, { ok: true, chat, messages });
   });
 
@@ -629,7 +633,14 @@ function persistAssistantMessage(chatId, result, user) {
     id, chat_id: chatId, role: 'assistant', content: result.content || '',
     citations: JSON.stringify(result.citations || []),
     provider: result.provider || '', model: result.model || '',
-    latency_ms: Number(result.ms || 0), feedback: 0, created_at: nowIso()
+    latency_ms: Number(result.ms || 0), feedback: 0, created_at: nowIso(),
+    // 语义标记：刷新/重新打开会话后仍需保留「未引用知识库」的警示
+    meta: JSON.stringify({
+      general: !!result.general,
+      noContext: !!result.noContext,
+      interrupted: !!result.interrupted,
+      fallback: !!result.fallback
+    })
   });
   const chat = get(`SELECT * FROM chats WHERE id=?`, chatId);
   if (chat) {

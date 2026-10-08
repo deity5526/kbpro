@@ -416,9 +416,27 @@ function bindGlobalOnce() {
     if (e.key.toLowerCase() === 'n' && !mod) { e.preventDefault(); document.getElementById('btn-new')?.click(); return; }
     if (e.key.toLowerCase() === 'u' && !mod) { e.preventDefault(); document.getElementById('upload-trigger')?.click(); }
   });
+
+  // 会话失效：回到登录页。
+  // 这里用整页重载而不是直接切换 DOM —— 因为「带着有效会话启动」的页面从未调用过
+  // showAuth()，登录表单没有绑定提交事件，直接切过去会得到一个点不动的登录页。
+  window.addEventListener('kbpro:unauthorized', () => {
+    if (unauthorizedHandling) return;
+    unauthorizedHandling = true;
+    try { eventSource?.close(); eventSource = null; } catch { /* 忽略 */ }
+    try { notify.warn('登录状态已失效，正在返回登录页…', { duration: 1600 }); } catch { /* 忽略 */ }
+    setTimeout(() => location.reload(), 800);
+  });
 }
 
+let unauthorizedHandling = false;
+let shellEventsBound = false;
+
 function bindShellEvents() {
+  // 幂等：重复绑定会让「上传」等全局动作被触发两次（弹出两个文件选择框）
+  if (shellEventsBound) return;
+  shellEventsBound = true;
+
   // 侧边栏收起（桌面）/ 抽屉（移动）
   qs('#sidebar-collapse').addEventListener('click', () => {
     setState({ ui: { sidebarCollapsed: !getState().ui.sidebarCollapsed } });

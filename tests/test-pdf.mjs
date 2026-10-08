@@ -2,21 +2,30 @@
  * kbpro/tests/test-pdf.mjs
  * Fixture-driven tests for the dependency-free PDF text extractor.
  *
- * Every fixture is built here from raw PDF syntax (no npm deps) and also
- * written to tests/fixtures/pdf/ so the corpus stays inspectable.
+ * Every fixture is built here from raw PDF syntax (no npm deps).
  *
- * Run: node kbpro/tests/test-pdf.mjs
+ * 注意：生成物写入**系统临时目录**，而不是仓库内的 tests/fixtures/pdf/。
+ * 原因：加密类 fixture 每次都会用新的随机盐/IV，若写回仓库，每跑一次测试
+ * 就会让 3 个二进制文件变成「已修改」，把工作区弄脏。
+ * 仓库里的那份 PDF 语料是稳定的快照，供 test-formats.mjs 独立使用。
+ *
+ * Run: node tests/test-pdf.mjs
  */
 
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractPdfText, getPdfInfo } from '../server/lib/pdf.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES = path.join(__dirname, 'fixtures', 'pdf');
+/** 仓库内稳定的语料快照（供 test-formats.mjs 使用，本套件只读取） */
+const CORPUS = path.join(__dirname, 'fixtures', 'pdf');
+/** 本套件自己生成的一次性 fixture，写到临时目录，避免污染仓库 */
+const FIXTURES = path.join(os.tmpdir(), 'kbpro-pdf-fixtures');
+fs.rmSync(FIXTURES, { recursive: true, force: true });
 fs.mkdirSync(FIXTURES, { recursive: true });
 
 /* =========================================================================

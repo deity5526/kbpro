@@ -15,7 +15,8 @@ const FULL = process.argv.includes('--full');
 const SUITES = [
   { file: 'tests/test-frontend.mjs', label: '前端契约审计', desc: '语法 / 导入 / 图标 / API / 路由 / 样式' },
   { file: 'tests/test-api.mjs', label: '后端 API 端到端', desc: '认证、权限、文件、笔记、检索、RAG、备份' },
-  { file: 'tests/test-formats.mjs', label: '多格式解析与检索', desc: 'PDF/Word/Excel/PPT/文本 全链路' }
+  { file: 'tests/test-formats.mjs', label: '多格式解析与检索', desc: 'PDF/Word/Excel/PPT/文本 全链路' },
+  { file: 'tests/test-ai-fallback.mjs', label: '大模型容错与安全', desc: '流中断 / 错误负载 / 参数重试 / SSRF' }
 ];
 
 const EXTRA = [

@@ -795,6 +795,46 @@ async function runSuite() {
     check(autoKeyOnly.provider !== 'openai', '只有 Key 没有 Base URL 时不会启用大模型', autoKeyOnly.provider);
   }
 
+  /* ============================ 存储配额 ============================ */
+  section('存储配额 · 超额必须真正被拦截（而非仅展示）');
+  {
+    const usedBefore = (await json('GET', '/api/users/me/storage')).data.used;
+    const { getDb } = await import('../server/db.js');
+    getDb().prepare(`UPDATE users SET storage_quota=? WHERE email=?`).run(usedBefore + 2048, 'admin@kbpro.local');
+
+    // 1) 配额内的文件应当正常上传
+    const small = Buffer.alloc(1024, 0x41);
+    const fd1 = new FormData();
+    fd1.append('workspaceId', personalWs);
+    fd1.append('file', new Blob([small], { type: 'text/plain' }), 'quota-small.txt');
+    const okUp = await api('POST', '/api/files/upload', fd1);
+    eq(okUp.status, 201, '配额内的文件正常上传');
+
+    // 2) 超过剩余配额的文件必须被拒收
+    const big = Buffer.alloc(8192, 0x42);
+    const fd2 = new FormData();
+    fd2.append('workspaceId', personalWs);
+    fd2.append('file', new Blob([big], { type: 'text/plain' }), 'quota-over.txt');
+    const overUp = await api('POST', '/api/files/upload', fd2);
+    check(overUp.status !== 201, '超出配额的上传被拒绝', overUp.status);
+    check((overUp.data?.failed || []).some((f) => /配额/.test(f.error || '')),
+      '失败原因明确说明是配额问题', overUp.data?.failed);
+
+    // 3) 新建文本文档接口同样受限
+    const textOver = await json('POST', '/api/files/text', {
+      workspaceId: personalWs, name: 'quota-note.md', content: 'x'.repeat(4096)
+    });
+    eq(textOver.status, 413, '新建文本文档同样受配额限制');
+
+    // 4) 确认存储用量没有被超额写入
+    const usedAfter = (await json('GET', '/api/users/me/storage')).data.used;
+    check(usedAfter <= usedBefore + 2048, '存储用量未超过配额', { usedBefore, usedAfter });
+
+    // 恢复为不限额，避免影响后续用例
+    getDb().prepare(`UPDATE users SET storage_quota=0 WHERE email=?`).run('admin@kbpro.local');
+    eq((await json('GET', '/api/users/me/storage')).data.quota, 0, '恢复为不限额');
+  }
+
   /* ============================ 权限边界 ============================ */
   section('边界 · 未登录 / 非法参数 / 越权');
   {

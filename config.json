@@ -23,7 +23,11 @@
     "timeoutMs": 120000,
     "answerWithoutContext": true,
     "thinking": null,
-    "reasoningEffort": ""
+    "reasoningEffort": "",
+
+    "allowLoopbackBaseUrl": true,
+    "allowPrivateBaseUrl": true,
+    "allowedBaseUrlHosts": []
   },
 
   "bootstrap": {
