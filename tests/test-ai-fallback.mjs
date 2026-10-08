@@ -34,6 +34,9 @@ function check(cond, label, detail) {
     console.log(`  \x1b[31m✗\x1b[0m ${label}${detail !== undefined ? `  → ${JSON.stringify(detail)?.slice(0, 320)}` : ''}`);
   }
 }
+function eq(actual, expected, label) {
+  check(actual === expected, label, actual === expected ? undefined : { actual, expected });
+}
 
 /* ================================================================== 假上游 */
 
@@ -390,6 +393,50 @@ async function main() {
 
       const badScheme = await api('POST', '/api/users/me/ai/test', { provider: 'openai', baseUrl: 'file:///etc/passwd', model: 'm' });
       check(badScheme.status >= 400, '拒绝非 http(s) 协议', badScheme.status);
+    }
+
+    /* ---------------- 9b. 限定文档时的检索覆盖性 ---------------- */
+    head('检索覆盖 · 限定文档时必须每份都被引用');
+    {
+      // 两份用词互不重叠的文档，与下面的泛泛提问也没有词汇交集
+      const docA = '# 仓储物流作业规范\n\n入库包含验收、上架、盘点三个环节。冷链商品需全程温控记录。\n';
+      const docB = '# 品牌视觉识别手册\n\n主色深灰，辅助色暖橙。标志最小使用尺寸为十六毫米。\n';
+      const upload = async (name, text) => {
+        const fd = new FormData();
+        fd.append('workspaceId', ws.id);
+        fd.append('file', new Blob([text], { type: 'text/markdown' }), name);
+        const res = await fetch(`${BASE}/api/files/upload`, { method: 'POST', headers: { Cookie: cookie }, body: fd });
+        return (await res.json()).files[0].id;
+      };
+      const idA = await upload('仓储物流作业规范.md', docA);
+      const idB = await upload('品牌视觉识别手册.md', docB);
+      check(!!idA && !!idB, '上传两份用于覆盖性验证的文档');
+      for (const id of [idA, idB]) {
+        for (let i = 0; i < 40; i++) {
+          const t = await api('GET', `/api/files/${id}/text`);
+          if (t.data?.status === 'ok') break;
+          await sleep(200);
+        }
+      }
+
+      // 泛泛提问：与两份文档几乎没有词汇交集，纯词面检索会一无所获
+      const vague = '这两份文档分别讲了什么？';
+
+      const both = await api('POST', '/api/ai/ask', { question: vague, workspaceId: ws.id, fileIds: [idA, idB], stream: false });
+      const titles = new Set((both.data?.citations || []).map((c) => c.title));
+      eq(titles.size, 2, '限定 2 份文档时两份都被引用（不会只用到其中一份）');
+      check(titles.has('仓储物流作业规范.md') && titles.has('品牌视觉识别手册.md'),
+        '两份文档都出现在引用里', [...titles]);
+
+      const one = await api('POST', '/api/ai/ask', { question: vague, workspaceId: ws.id, fileIds: [idA], stream: false });
+      const oneTitles = new Set((one.data?.citations || []).map((c) => c.title));
+      check(one.data.citations.length >= 1, '限定单份文档时能取到依据（不再返回「无依据」）', one.data.citations.length);
+      eq(oneTitles.size, 1, '限定单份时只引用该文档');
+      check(oneTitles.has('仓储物流作业规范.md'), '引用的是被限定的那份文档', [...oneTitles]);
+
+      // 不限定：不应因为兜底逻辑而改变正常的按相关性召回
+      const free = await api('POST', '/api/ai/ask', { question: '本季度营业收入是多少？', workspaceId: ws.id, stream: false });
+      check(free.status === 200 && Array.isArray(free.data.citations), '不限定文件时仍正常按相关性召回');
     }
 
     /* ---------------- 10. 恢复可用配置 ---------------- */

@@ -899,7 +899,7 @@ function settingsHtml(s) {
               <div class="setting-desc">每次提问注入上下文的片段数量。越大回答越全面，也越消耗 token 与时间。</div>
             </div>
             <div class="setting-ctl">
-              <input class="input input-sm" type="number" min="1" max="50" step="1" id="st-topk" value="${esc(String(s.ragTopK ?? 6))}" style="width:110px">
+              <input class="input input-sm" type="number" min="1" max="50" step="1" id="st-topk" value="${esc(String(s.ragTopK ?? 8))}" style="width:110px">
             </div>
           </div>
 
@@ -909,7 +909,7 @@ function settingsHtml(s) {
               <div class="setting-desc">文本切分的字符数。需要重新解析文档后才会应用到已有内容。</div>
             </div>
             <div class="setting-ctl">
-              <input class="input input-sm" type="number" min="100" max="4000" step="50" id="st-chunk" value="${esc(String(s.ragChunkSize ?? 800))}" style="width:110px">
+              <input class="input input-sm" type="number" min="100" max="4000" step="50" id="st-chunk" value="${esc(String(s.ragChunkSize ?? 900))}" style="width:110px">
               <span class="text-sm text-muted">字符</span>
             </div>
           </div>
@@ -920,7 +920,7 @@ function settingsHtml(s) {
               <div class="setting-desc">相邻片段的重叠字符数，用于避免语义被切断。同样需要重建索引后生效。</div>
             </div>
             <div class="setting-ctl">
-              <input class="input input-sm" type="number" min="0" max="1000" step="10" id="st-overlap" value="${esc(String(s.ragChunkOverlap ?? 120))}" style="width:110px">
+              <input class="input input-sm" type="number" min="0" max="1000" step="10" id="st-overlap" value="${esc(String(s.ragChunkOverlap ?? 180))}" style="width:110px">
               <span class="text-sm text-muted">字符</span>
             </div>
           </div>
@@ -994,7 +994,7 @@ function settingsHtml(s) {
               <div class="setting-desc">0 更稳定保守，1 更发散。问答场景建议 0.2 - 0.4。</div>
             </div>
             <div class="setting-ctl">
-              <input class="input input-sm" type="number" min="0" max="2" step="0.1" id="st-ai-temp" value="${esc(String(ai.temperature ?? 0.3))}" style="width:110px">
+              <input class="input input-sm" type="number" min="0" max="2" step="0.1" id="st-ai-temp" value="${esc(String(ai.temperature ?? 0.2))}" style="width:110px">
             </div>
           </div>
 
@@ -1004,7 +1004,7 @@ function settingsHtml(s) {
               <div class="setting-desc">单次回答的长度上限，过大可能触发接口方限制。</div>
             </div>
             <div class="setting-ctl">
-              <input class="input input-sm" type="number" min="128" max="32768" step="128" id="st-ai-maxtokens" value="${esc(String(ai.maxTokens ?? 1024))}" style="width:120px">
+              <input class="input input-sm" type="number" min="128" max="32768" step="128" id="st-ai-maxtokens" value="${esc(String(ai.maxTokens ?? 1600))}" style="width:120px">
             </div>
           </div>
 

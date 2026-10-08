@@ -359,7 +359,64 @@ export function retrieveContexts({ workspaceIds = [], query, topK = 8, fileIds =
     picked.push(item);
     if (picked.length >= topK) break;
   }
+
+  // 用户已显式指定文档：确保**每一份**指定文档都有代表。
+  //
+  // 两个场景：
+  //  1) 一条都没匹配上（「就此文档提问 → 这份文档讲了什么？」这类问题与正文用词
+  //     几乎没有交集，词面检索必然为空）→ 把额度都给指定文档；
+  //  2) 只匹配上了其中一部分（问「对比这两份」却只召回了一份）→ 给落空的文档各补 1 块，
+  //     否则用户会以为两份都被参考了，而答案实际只基于其中一份。
+  //
+  // 注意：仅当用户显式限定文件时才兜底；普通提问仍严格按相关性召回，不拿无关文档凑数。
+  if (fileIds && fileIds.length) {
+    const covered = new Set(picked.map((i) => i.fileId));
+    const missing = fileIds.filter((id) => !covered.has(id));
+    if (missing.length) {
+      const budget = picked.length === 0 ? topK : missing.length;
+      picked.push(...chunksOfScopedFiles(missing, budget));
+    }
+  }
   return picked;
+}
+
+/**
+ * 兜底：按文档顺序取指定文件的若干知识块（长文档取开头部分，通常正是概述所在）。
+ * 多文件时每个文件均分名额，避免第一个文件把名额吃光。
+ */
+function chunksOfScopedFiles(fileIds, topK) {
+  const ph = fileIds.map(() => '?').join(',');
+  const rows = all(
+    `SELECT c.id AS chunk_id, c.file_id, c.heading, c.page, c.text,
+            f.name, f.ext, f.folder_id, f.tags
+       FROM chunks c JOIN files f ON f.id = c.file_id
+      WHERE c.file_id IN (${ph}) AND f.deleted_at IS NULL
+      ORDER BY c.file_id, c.idx`,
+    ...fileIds
+  );
+  const cap = fileIds.length === 1 ? topK : Math.max(1, Math.ceil(topK / fileIds.length));
+  const perFile = new Map();
+  const out = [];
+  for (const r of rows) {
+    const n = perFile.get(r.file_id) || 0;
+    if (n >= cap) continue;
+    perFile.set(r.file_id, n + 1);
+    out.push({
+      chunkId: Number(r.chunk_id),
+      fileId: r.file_id,
+      title: r.name,
+      ext: r.ext,
+      folderId: r.folder_id,
+      tags: r.tags,
+      heading: r.heading || '',
+      page: Number(r.page || 0),
+      text: String(r.text || ''),
+      score: 0, bm25: 0, vec: 0,
+      sources: ['scoped']
+    });
+    if (out.length >= topK) break;
+  }
+  return out;
 }
 
 /* ================================================================== 提示词 */
