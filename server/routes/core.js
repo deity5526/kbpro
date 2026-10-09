@@ -2,8 +2,9 @@
  * KBPRO — 路由：认证 / 用户 / 知识库 / 团队 / 文件夹 / 标签
  */
 import { all, get, run, insert, update, tx, nowIso, audit, scalar, tableCounts, dbSizeBytes } from '../db.js';
-import { randomId, passwordStrength, encryptText } from '../lib/crypto.js';
+import { randomId, passwordStrength, encryptText, verifyPassword } from '../lib/crypto.js';
 import { httpError, sendJson, clientIp, formatBytes } from '../lib/http.js';
+import { deleteAccount, accountDeletionBlockers } from '../lib/account.js';
 import { loadConfig, saveConfig } from '../config.js';
 import {
   registerUser, loginUser, createSession, destroySession, destroyAllSessions, requireUser, requireAdmin,
@@ -119,6 +120,26 @@ export function registerCoreRoutes(router) {
     setCookie(res, cookieHeader(token));
     audit({ userId: user.id, userName: user.name, action: 'user.password.change', resourceType: 'user', resourceId: user.id });
     sendJson(res, 200, { ok: true, token, strength: passwordStrength(newPassword) });
+  });
+
+  /** 注销账号：需重新输入密码确认；有成员依赖的团队会阻断注销 */
+  router.delete('/api/users/me', async (req, res, ctx) => {
+    const user = ctx.requireUser();
+    requireBody(ctx.body || {}, ['password']);
+    if (!verifyPassword(String(ctx.body.password), { hash: user.password_hash, salt: user.password_salt })) {
+      throw httpError(400, '密码不正确，账号未注销');
+    }
+    const blockers = accountDeletionBlockers(user.id);
+    if (blockers.length) {
+      throw httpError(400, `你还是团队「${blockers.join('、')}」的所有者且团队中还有其他成员，请先转让团队所有权再注销`);
+    }
+
+    const name = user.name;
+    const result = await deleteAccount(user);
+
+    audit({ userId: user.id, userName: name, action: 'user.delete', resourceType: 'user', resourceId: user.id, detail: `清理知识库 ${result.workspaces} 个、文件 ${result.files} 个、笔记 ${result.notes} 篇` });
+    setCookie(res, cookieHeader('', { clear: true }));
+    sendJson(res, 200, { ok: true, deleted: true, ...result });
   });
 
   router.get('/api/users/me/storage', async (req, res, ctx) => {

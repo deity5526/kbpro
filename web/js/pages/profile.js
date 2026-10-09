@@ -3,7 +3,7 @@
  * 资料 / 安全 / AI 引擎 / 存储
  */
 import {
-  qs, qsa, on, applyIcons, icon, notify, confirmDialog, emptyState, esc,
+  qs, qsa, on, applyIcons, icon, notify, confirmDialog, emptyState, esc, modal,
   badge, progressHtml, avatarHtml, skeleton, downloadUrl,
   withLoading, formatBytes, formatNumber, formatDateTime
 } from '../ui.js';
@@ -332,6 +332,25 @@ function renderSecurity(container, ctx) {
           <div class="field-hint">退出后需要重新输入邮箱与密码。</div>
         </div>
       </div>
+
+      <div class="card" style="border-color:var(--c-danger-bg)">
+        <div class="card-pad">
+          <div class="section-head">
+            <div>
+              <div class="section-title">${icon('alert')} 注销账号</div>
+              <div class="section-sub">注销是不可恢复的操作，请先确认后果</div>
+            </div>
+          </div>
+          <ul class="text-sm text-2" style="margin:0 0 12px;padding-left:20px;line-height:1.9">
+            <li>你的<strong>个人知识库</strong>及其下的全部文件、笔记与历史版本会被删除</li>
+            <li>个人资料、头像与大模型配置会被清除，所有设备上的登录立即失效</li>
+            <li>团队知识库属于团队资产，<strong>不会被删除</strong>；你在团队中的成员关系会被移除</li>
+            <li>如果你仍是某个团队的所有者且团队中还有其他成员，需要先转让团队所有权</li>
+          </ul>
+          <button class="btn btn-danger" data-act="delete-account">${icon('trash')}<span>注销账号</span></button>
+          <div class="field-hint">注销后账号无法登录，也无法再用同一邮箱找回数据。</div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -453,6 +472,52 @@ function bindSecurity(container, ctx) {
     }
     document.dispatchEvent(new CustomEvent('kbpro:logout'));
     location.reload();
+  }));
+
+  // 注销账号：先看后果，再输密码 + 手打确认词，避免误触
+  offs.push(on(panel, 'click', '[data-act="delete-account"]', () => {
+    const m = modal({
+      title: '注销账号',
+      sub: '此操作不可恢复',
+      size: 'sm',
+      body: `<div class="card" style="padding:10px 12px;margin-bottom:14px;border-color:var(--c-danger-bg);background:var(--c-danger-bg)">
+          <div class="text-sm" style="line-height:1.8">
+            注销后将删除你的<strong>个人知识库及其全部文件与笔记</strong>，清除个人资料与大模型配置，
+            并退出所有设备上的登录。团队知识库不会被删除。
+          </div>
+        </div>
+        <div class="field">
+          <label>当前密码</label>
+          <input class="input" type="password" data-field="password" autocomplete="current-password" placeholder="请输入当前账号密码">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label>确认操作</label>
+          <input class="input" data-field="confirm" placeholder="请输入：注销账号" autocomplete="off">
+          <div class="field-hint">需要手动输入这四个字，防止误点。</div>
+        </div>`,
+      actions: [
+        { label: '取消' },
+        {
+          label: '确认注销', danger: true, keepOpen: true,
+          onClick: async (close, btn) => {
+            const password = qs('[data-field="password"]', m.body).value;
+            const confirm = qs('[data-field="confirm"]', m.body).value.trim();
+            if (!password) { notify.warn('请输入当前密码'); return; }
+            if (confirm !== '注销账号') { notify.warn('请按提示输入「注销账号」'); return; }
+            btn.disabled = true;
+            try {
+              const r = await ctx.api.deleteAccount(password);
+              close();
+              notify.success(`账号已注销（清理知识库 ${r.workspaces} 个、文件 ${r.files} 个、笔记 ${r.notes} 篇）`, { duration: 2600 });
+              setTimeout(() => location.reload(), 1200);
+            } catch (err) {
+              notify.error(err?.message || '注销失败');
+              btn.disabled = false;
+            }
+          }
+        }
+      ]
+    });
   }));
 
   return offs;

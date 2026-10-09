@@ -81,6 +81,7 @@ export const api = {
   /* --- 个人中心 --- */
   updateMe: (payload) => patch('/api/users/me', payload),
   changePassword: (oldPassword, newPassword) => post('/api/users/me/password', { oldPassword, newPassword }),
+  deleteAccount: (password) => del('/api/users/me', { body: { password } }),
   storage: () => get('/api/users/me/storage'),
   aiConfig: () => get('/api/users/me/ai'),
   testAiConfig: (payload) => post('/api/users/me/ai/test', payload),
