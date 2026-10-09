@@ -149,17 +149,19 @@ export class Router {
 
   match(method, pathname) {
     const m = method.toUpperCase();
-    let pathMatched = false;
+    const allowed = new Set();
     for (const route of this.routes) {
       const found = route.regex.exec(pathname);
       if (!found) continue;
-      pathMatched = true;
+      allowed.add(route.method);
       if (route.method !== m) continue;
       const params = {};
       route.keys.forEach((k, i) => { params[k] = decodeURIComponent(found[i + 1]); });
       return { route, params };
     }
-    return pathMatched ? { methodMismatch: true } : null;
+    // 路径存在但方法不匹配时，把该路径实际支持的方法一并带回去，
+    // 否则「方法 DELETE 不被支持」这句提示帮不上任何忙
+    return allowed.size ? { methodMismatch: true, allowed: [...allowed].sort() } : null;
   }
 }
 

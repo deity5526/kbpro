@@ -134,6 +134,14 @@ async function main() {
   eq(wrongPw.status, 400, '密码错误 → 400');
   check(/密码不正确/.test(wrongPw.data?.error || ''), '错误信息说明密码不正确', wrongPw.data?.error);
 
+  // 方法不匹配时必须告诉调用方「这个路径支持哪些方法」。
+  // 曾经的提示只有一句「方法 X 不被支持」，排查全靠猜。
+  const badMethod = await api('PUT', '/api/users/me', {});
+  eq(badMethod.status, 405, '未注册的方法返回 405');
+  check(/该路径支持/.test(badMethod.data?.error || ''), '405 提示列出该路径支持的方法', badMethod.data?.error);
+  check(/DELETE/.test(badMethod.data?.error || '') && /PATCH/.test(badMethod.data?.error || ''),
+    '列出的方法与实际注册的一致（DELETE / PATCH）', badMethod.data?.error);
+
   const stillThere = await api('GET', '/api/auth/me');
   eq(stillThere.status, 200, '被拒绝后账号仍然可用（不会误注销）');
 

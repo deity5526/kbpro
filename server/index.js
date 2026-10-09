@@ -170,7 +170,10 @@ async function handleRequest(req, res) {
   }
 
   if (matched?.methodMismatch) {
-    sendError(res, 405, `方法 ${req.method} 不被支持`);
+    const allowed = matched.allowed || [];
+    sendError(res, 405, allowed.length
+      ? `方法 ${req.method} 不被支持，该路径支持：${allowed.join(' / ')}`
+      : `方法 ${req.method} 不被支持`);
     return;
   }
 
