@@ -794,6 +794,29 @@ function openMemberMenu(anchor, member, ctx, container) {
     })),
     { sep: true },
     {
+      label: '转让团队所有权',
+      icon: 'shield',
+      disabled: blocked,
+      onClick: async () => {
+        const ok = await confirmDialog({
+          title: '转让团队所有权',
+          message: `确定把团队的所有权转让给 <strong>${esc(member.name)}</strong>（${esc(member.email)}）吗？<br>`
+            + '<span class="text-muted">转让后对方成为所有者，你保留团队管理员身份，仍可管理成员与知识库。</span>',
+          confirmText: '转让所有权',
+          danger: true
+        });
+        if (!ok) return;
+        try {
+          await ctx.api.transferTeam(page.team.id, member.id);
+          notify.success(`已把团队所有权转让给 ${member.name}`);
+          await loadTeamDetail(ctx);
+          refreshDetail(ctx);
+        } catch (err) {
+          notify.error(err.message);
+        }
+      }
+    },
+    {
       label: '移出团队',
       icon: 'trash',
       danger: true,

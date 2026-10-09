@@ -4,7 +4,7 @@
 import { all, get, run, insert, update, tx, nowIso, audit, scalar, tableCounts, dbSizeBytes } from '../db.js';
 import { randomId, passwordStrength, encryptText, verifyPassword } from '../lib/crypto.js';
 import { httpError, sendJson, clientIp, formatBytes } from '../lib/http.js';
-import { deleteAccount, accountDeletionBlockers } from '../lib/account.js';
+import { deleteAccount, accountDeletionBlockers, otherActiveAdmins } from '../lib/account.js';
 import { loadConfig, saveConfig } from '../config.js';
 import {
   registerUser, loginUser, createSession, destroySession, destroyAllSessions, requireUser, requireAdmin,
@@ -240,6 +240,130 @@ export function registerCoreRoutes(router) {
     sendJson(res, 200, { ok: true, status });
   });
 
+  /* ============================== 用户管理（仅管理员） ============================== */
+
+  /** 用户列表：带用量统计，支持按关键词、角色、状态筛选 */
+  router.get('/api/admin/users', async (req, res, ctx) => {
+    const admin = ctx.requireUser();
+    if (admin.role !== 'admin') throw httpError(403, '需要管理员权限');
+
+    const q = str(ctx.query.q, '', 80).trim();
+    const role = str(ctx.query.role, '', 20);
+    const status = str(ctx.query.status, '', 20);
+    const where = [];
+    const params = [];
+    if (q) { where.push(`(u.name LIKE ? OR u.email LIKE ?)`); params.push(`%${q}%`, `%${q}%`); }
+    if (role) { where.push(`u.role=?`); params.push(role); }
+    if (status) { where.push(`u.status=?`); params.push(status); }
+
+    const rows = all(
+      `SELECT u.id, u.email, u.name, u.role, u.status, u.storage_used, u.storage_quota,
+              u.created_at, u.last_login_at,
+              (SELECT COUNT(*) FROM files f WHERE f.created_by=u.id AND f.deleted_at IS NULL) AS files,
+              (SELECT COUNT(*) FROM notes n WHERE n.created_by=u.id AND n.deleted_at IS NULL) AS notes,
+              (SELECT COUNT(*) FROM workspaces w WHERE w.owner_id=u.id) AS workspaces
+         FROM users u
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY CASE u.status WHEN 'active' THEN 0 ELSE 1 END, u.created_at DESC
+        LIMIT 200`,
+      ...params
+    );
+
+    sendJson(res, 200, {
+      ok: true,
+      users: rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        role: r.role,
+        status: r.status,
+        isSelf: r.id === admin.id,
+        isDeleted: r.status === 'deleted',
+        storageUsed: Number(r.storage_used || 0),
+        storageUsedText: formatBytes(r.storage_used || 0),
+        storageQuota: Number(r.storage_quota || 0),
+        files: Number(r.files || 0),
+        notes: Number(r.notes || 0),
+        workspaces: Number(r.workspaces || 0),
+        createdAt: r.created_at,
+        lastLoginAt: r.last_login_at || null
+      })),
+      summary: {
+        total: Number(scalar(`SELECT COUNT(*) FROM users WHERE status<>'deleted'`) || 0),
+        active: Number(scalar(`SELECT COUNT(*) FROM users WHERE status='active'`) || 0),
+        admins: Number(scalar(`SELECT COUNT(*) FROM users WHERE role='admin' AND status='active'`) || 0),
+        selfId: admin.id
+      }
+    });
+  });
+
+  /** 修改用户角色 / 启用停用；始终保证系统里至少有一位可用管理员 */
+  router.patch('/api/admin/users/:id', async (req, res, ctx) => {
+    const admin = ctx.requireUser();
+    if (admin.role !== 'admin') throw httpError(403, '需要管理员权限');
+    const target = findUserById(ctx.params.id);
+    if (!target) throw httpError(404, '用户不存在');
+    if (target.status === 'deleted') throw httpError(400, '该账号已注销，无法修改');
+
+    const body = ctx.body || {};
+    const patch = { updated_at: nowIso() };
+
+    if (body.role !== undefined) {
+      const role = str(body.role, '', 20);
+      if (!['admin', 'user'].includes(role)) throw httpError(400, '角色只能是 admin 或 user');
+      if (target.id === admin.id && role !== 'admin') throw httpError(400, '不能取消自己的管理员权限');
+      if (role !== 'admin' && target.role === 'admin' && otherActiveAdmins(target.id) === 0) {
+        throw httpError(400, '系统必须保留至少一位可用管理员');
+      }
+      patch.role = role;
+    }
+    if (body.status !== undefined) {
+      const status = str(body.status, '', 20);
+      if (!['active', 'disabled'].includes(status)) throw httpError(400, '状态只能是 active 或 disabled');
+      if (target.id === admin.id) throw httpError(400, '不能停用自己的账号');
+      if (status !== 'active' && target.role === 'admin' && otherActiveAdmins(target.id) === 0) {
+        throw httpError(400, '系统必须保留至少一位可用管理员');
+      }
+      patch.status = status;
+    }
+    if (Object.keys(patch).length <= 1) throw httpError(400, '没有需要修改的字段');
+
+    update('users', target.id, patch);
+    // 停用后立即让该用户的全部会话失效
+    if (patch.status && patch.status !== 'active') destroyAllSessions(target.id);
+    audit({
+      userId: admin.id, userName: admin.name, action: 'user.admin.update',
+      resourceType: 'user', resourceId: target.id, resourceName: target.name,
+      detail: Object.keys(patch).filter((k) => k !== 'updated_at').map((k) => `${k}=${patch[k]}`).join(',')
+    });
+    const fresh = findUserById(target.id);
+    sendJson(res, 200, {
+      ok: true,
+      user: { id: fresh.id, email: fresh.email, name: fresh.name, role: fresh.role, status: fresh.status }
+    });
+  });
+
+  /** 管理员删除用户：复用注销逻辑；先把其团队所有权移交给操作者，避免因「所有者还有成员」卡住 */
+  router.delete('/api/admin/users/:id', async (req, res, ctx) => {
+    const admin = ctx.requireUser();
+    if (admin.role !== 'admin') throw httpError(403, '需要管理员权限');
+    const target = findUserById(ctx.params.id);
+    if (!target) throw httpError(404, '用户不存在');
+    if (target.id === admin.id) throw httpError(400, '请到「个人中心 → 安全 → 注销账号」删除自己的账号');
+    if (target.status === 'deleted') throw httpError(400, '该账号已经注销');
+
+    const teams = Number(scalar(`SELECT COUNT(*) FROM teams WHERE owner_id=?`, target.id) || 0);
+    if (teams) run(`UPDATE teams SET owner_id=?, updated_at=? WHERE owner_id=?`, admin.id, nowIso(), target.id);
+
+    const result = await deleteAccount(target);
+    audit({
+      userId: admin.id, userName: admin.name, action: 'user.admin.delete',
+      resourceType: 'user', resourceId: target.id, resourceName: target.name,
+      detail: `接管团队 ${teams} 个；清理知识库 ${result.workspaces} 个、文件 ${result.files} 个、笔记 ${result.notes} 篇`
+    });
+    sendJson(res, 200, { ok: true, deleted: true, teamsTaken: teams, ...result });
+  });
+
   router.get('/api/users/search', async (req, res, ctx) => {
     const user = ctx.requireUser();
     const q = str(ctx.query.q, '', 120).trim();
@@ -457,6 +581,35 @@ export function registerCoreRoutes(router) {
     if (description !== undefined) patch.description = str(description, '', 300);
     update('teams', team.id, patch);
     sendJson(res, 200, { ok: true, team: get(`SELECT * FROM teams WHERE id=?`, team.id) });
+  });
+
+  /** 转让团队所有权：只有当前所有者可发起，目标必须是本团队的活跃成员 */
+  router.post('/api/teams/:id/transfer', async (req, res, ctx) => {
+    const user = ctx.requireUser();
+    const team = get(`SELECT * FROM teams WHERE id=?`, ctx.params.id);
+    if (!team) throw httpError(404, '团队不存在');
+    if (team.owner_id !== user.id) throw httpError(403, '只有团队所有者可以转让所有权');
+
+    const targetId = str((ctx.body || {}).userId, '', 80);
+    if (!targetId) throw httpError(400, '缺少 userId');
+    if (targetId === user.id) throw httpError(400, '不能把团队转让给自己');
+    const target = get(`SELECT * FROM team_members WHERE team_id=? AND user_id=? AND status='active'`, team.id, targetId);
+    if (!target) throw httpError(400, '目标用户不是本团队的活跃成员');
+
+    const now = nowIso();
+    tx((d) => {
+      d.prepare(`UPDATE teams SET owner_id=?, updated_at=? WHERE id=?`).run(targetId, now, team.id);
+      d.prepare(`UPDATE team_members SET role='owner' WHERE team_id=? AND user_id=?`).run(team.id, targetId);
+      // 原所有者保留管理员身份，避免转让后自己反而失去管理权限
+      d.prepare(`UPDATE team_members SET role='admin' WHERE team_id=? AND user_id=?`).run(team.id, user.id);
+      d.prepare(`UPDATE workspaces SET owner_id=?, updated_at=? WHERE team_id=?`).run(targetId, now, team.id);
+    });
+    audit({
+      userId: user.id, userName: user.name, action: 'team.transfer',
+      resourceType: 'team', resourceId: team.id, resourceName: team.name,
+      detail: `新所有者 ${targetId}`
+    });
+    sendJson(res, 200, { ok: true });
   });
 
   router.get('/api/teams/:id/members', async (req, res, ctx) => {

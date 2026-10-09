@@ -1386,6 +1386,15 @@ mark, .hl {
 .stat-inline-value { font-size: var(--fs-lg); font-weight: 640; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .stat-inline-label { font-size: var(--fs-xs); color: var(--c-text-3); }
 
+/* 管理页数据表（用户管理等） */
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.data-table th, .data-table td { padding: 9px 10px; border-bottom: 1px solid var(--c-border); text-align: left; vertical-align: middle; }
+.data-table th { background: var(--c-ink-50); font-weight: 600; color: var(--c-text-2); font-size: var(--fs-xs); white-space: nowrap; }
+.data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table tbody tr:hover { background: var(--c-ink-50); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table td .btn { margin-left: 4px; }
+
 /* 日志 */
 .log-row { display: grid; grid-template-columns: 148px 92px minmax(0, 1fr) 118px; gap: var(--sp-3); padding: 8px var(--sp-3); border-bottom: 1px solid var(--c-border); font-size: var(--fs-sm); align-items: center; }
 .log-row:hover { background: var(--c-ink-50); }

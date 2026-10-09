@@ -87,6 +87,9 @@ export const api = {
   testAiConfig: (payload) => post('/api/users/me/ai/test', payload),
   saveAiConfig: (payload) => put('/api/users/me/ai', payload),
   searchUsers: (q) => get(`/api/users/search${qs({ q })}`),
+  adminUsers: (params) => get(`/api/admin/users${qs(params)}`),
+  adminUpdateUser: (id, payload) => patch(`/api/admin/users/${id}`, payload),
+  adminDeleteUser: (id) => del(`/api/admin/users/${id}`),
   notifications: () => get('/api/notifications'),
   readNotifications: (ids) => post('/api/notifications/read', { ids }),
 
@@ -111,6 +114,7 @@ export const api = {
   addMember: (id, email, role) => post(`/api/teams/${id}/members`, { email, role }),
   updateMember: (id, userId, role) => patch(`/api/teams/${id}/members/${userId}`, { role }),
   removeMember: (id, userId) => del(`/api/teams/${id}/members/${userId}`),
+  transferTeam: (id, userId) => post(`/api/teams/${id}/transfer`, { userId }),
 
   /* --- 文件夹 --- */
   createFolder: (payload) => post('/api/folders', payload),

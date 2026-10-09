@@ -180,6 +180,18 @@ async function main() {
   const ownerAlive = await api('GET', '/api/auth/me');
   eq(ownerAlive.status, 200, '阻断后所有者账号仍然可用');
 
+  head('校验：唯一的管理员不能注销自己');
+  // 否则实例会永久失去管理员：用户记录还在（status=deleted），
+  // 而引导逻辑只在「一个用户都没有」时才创建管理员
+  useCookie(adminCookie);
+  const lastAdmin = await api('DELETE', '/api/users/me', { password: ADMIN_PW });
+  eq(lastAdmin.status, 400, '唯一管理员注销自己 → 400 阻断');
+  check(/唯一可用的管理员/.test(lastAdmin.data?.error || ''), '提示先创建或指定另一位管理员', lastAdmin.data?.error);
+  const adminStillOk = await api('GET', '/api/auth/me');
+  eq(adminStillOk.data?.user?.role, 'admin', '管理员账号未受影响，仍可登录');
+  const adminWs = await api('GET', '/api/workspaces');
+  check((adminWs.data?.workspaces || []).length > 0, '管理员的知识库未被清理');
+
   head('注销成功：数据清理');
   useCookie(victimCookie);
   const del = await api('DELETE', '/api/users/me', { password: victimPw });
@@ -232,9 +244,137 @@ async function main() {
   check(logs.status === 200 && /user\.delete/.test(flat), '审计日志中存在 user.delete 记录',
     logs.status === 200 ? flat.slice(0, 160) : logs.status);
 
+  head('用户管理（管理员端账户管理）');
+  useCookie(adminCookie);
+  const list = await api('GET', '/api/admin/users');
+  eq(list.status, 200, '管理员可以拉取用户列表');
+  check(Array.isArray(list.data?.users) && list.data.users.length >= 2, `列表中至少两个账号（${list.data?.users?.length}）`);
+  check((list.data?.summary?.admins || 0) >= 1, `统计里有可用管理员 ${list.data?.summary?.admins} 个`);
+  const meRow = (list.data?.users || []).find((u) => u.isSelf);
+  check(!!meRow, '列表标出了"我自己"');
+  check(typeof meRow?.storageUsedText === 'string', '列表带存储用量等统计字段', meRow?.storageUsedText);
+
+  // 非管理员不能访问
+  const someUser = (list.data?.users || []).find((u) => !u.isSelf && u.role !== 'admin' && u.status === 'active');
+  check(!!someUser, '列表里有一个普通成员可用于测试', someUser?.email);
+  let memberCookie = '';
+  const memberLogin = await loginAs(someUser.email, 'brandnew12345');
+  if (memberLogin.ok) {
+    memberCookie = memberLogin.cookie;
+    const denied = await api('GET', '/api/admin/users');
+    eq(denied.status, 403, '普通成员访问用户管理 → 403');
+    const deniedPatch = await api('PATCH', `/api/admin/users/${someUser.id}`, { role: 'admin' });
+    eq(deniedPatch.status, 403, '普通成员修改角色 → 403');
+  } else {
+    check(false, '普通成员登录失败，跳过越权校验', memberLogin.status);
+  }
+
+  head('用户管理：保护最后一位管理员');
+  useCookie(adminCookie);
+  const demoteSelf = await api('PATCH', `/api/admin/users/${meRow.id}`, { role: 'user' });
+  eq(demoteSelf.status, 400, '不能取消自己的管理员权限');
+  const disableSelf = await api('PATCH', `/api/admin/users/${meRow.id}`, { status: 'disabled' });
+  eq(disableSelf.status, 400, '不能停用自己的账号');
+  const badRole = await api('PATCH', `/api/admin/users/${someUser.id}`, { role: 'superuser' });
+  eq(badRole.status, 400, '非法角色被拒绝');
+  const noField = await api('PATCH', `/api/admin/users/${someUser.id}`, {});
+  eq(noField.status, 400, '没有可修改字段时返回 400');
+  const delSelfViaAdmin = await api('DELETE', `/api/admin/users/${meRow.id}`);
+  eq(delSelfViaAdmin.status, 400, '管理员不能从用户管理里删除自己（应走个人中心注销）');
+
+  head('用户管理：提升为管理员后，原管理员即可注销');
+  const promote = await api('PATCH', `/api/admin/users/${someUser.id}`, { role: 'admin' });
+  eq(promote.status, 200, '把普通成员提升为管理员');
+  eq(promote.data?.user?.role, 'admin', '角色已更新为 admin');
+
+  // 现在系统里有两个管理员，"唯一管理员"这道闸门应当放行
+  useCookie(adminCookie);
+  const adminDel = await api('DELETE', '/api/users/me', { password: ADMIN_PW });
+  eq(adminDel.status, 200, '有第二位管理员后，原管理员可以正常注销');
+  eq(adminDel.data?.deleted, true, '注销成功并返回清理结果');
+  useCookie(adminCookie);
+  const deadCookie = await api('GET', '/api/workspaces');
+  eq(deadCookie.status, 401, '原管理员注销后其会话立即失效');
+
+  head('用户管理：新管理员可以继续管理');
+  useCookie(memberCookie);
+  const afterList = await api('GET', '/api/admin/users');
+  eq(afterList.status, 200, '新管理员可以拉取用户列表');
+  eq(afterList.data?.summary?.admins, 1, '系统里仍有一位可用管理员');
+
+  // 注册一个干净的账号，用于验证"停用后立即无法登录"
+  cookie = '';
+  const spareEmail = `spare-${stamp}@example.com`;
+  const sparePw = 'sparepw12345';
+  const spareReg = await api('POST', '/api/auth/register', { email: spareEmail, password: sparePw, name: '待停用用户' });
+  eq(spareReg.status, 201, '注册一个用于停用测试的账号');
+  const spareCookie = cookie;
+
+  useCookie(memberCookie);
+  const spareRow = (await api('GET', `/api/admin/users?q=${encodeURIComponent(spareEmail)}`)).data?.users?.[0];
+  check(!!spareRow, '能在用户管理里搜到这个账号', spareEmail);
+  const disabled = await api('PATCH', `/api/admin/users/${spareRow.id}`, { status: 'disabled' });
+  eq(disabled.status, 200, '管理员可以停用账号');
+  eq(disabled.data?.user?.status, 'disabled', '状态已置为 disabled');
+
+  useCookie(spareCookie);
+  const kicked = await api('GET', '/api/workspaces');
+  eq(kicked.status, 401, '停用后该用户已有会话立即失效');
+  cookie = '';
+  const tryLogin = await loginAs(spareEmail, sparePw);
+  eq(tryLogin.ok, false, '被停用的账号无法再登录', tryLogin.status);
+
+  useCookie(memberCookie);
+  const enabled = await api('PATCH', `/api/admin/users/${spareRow.id}`, { status: 'active' });
+  eq(enabled.status, 200, '再次启用该账号');
+  cookie = '';
+  const relogin = await loginAs(spareEmail, sparePw);
+  eq(relogin.ok, true, '启用后可以重新登录');
+
+  head('用户管理：管理员删除他人账号');
+  useCookie(memberCookie);
+  const wouldBlock = await api('DELETE', `/api/admin/users/${spareRow.id}`);
+  check([200, 400].includes(wouldBlock.status), '管理员可以删除他人账号（或被合理阻断）', wouldBlock.status);
+  if (wouldBlock.status === 200) {
+    eq(wouldBlock.data?.deleted, true, '删除返回 deleted');
+    const gone = get(`SELECT status, name FROM users WHERE id=?`, spareRow.id);
+    eq(gone?.status, 'deleted', '目标账号已被匿名化');
+    eq(gone?.name, '已注销用户', '昵称已匿名化');
+  }
+
+  head('团队所有权可以转让（注销阻断的出口）');
+  // owner2 仍是团队所有者且团队里还有其他成员，只有转让出去才能注销
+  cookie = '';
+  const owner2Login = await loginAs(owner2Email, owner2Pw);
+  eq(owner2Login.ok, true, '团队所有者重新登录');
+  const owner2Cookie = owner2Login.cookie;
+
+  // 注意：此时原来的管理员已经注销，要邀请一个"当前仍然有效"的用户作为转让目标
+  const invite2 = await api('POST', `/api/teams/${team3Id}/members`, { email: someUser.email, role: 'editor' });
+  check([200, 201].includes(invite2.status), '邀请当前管理员加入团队', invite2.status);
+
+  const members = await api('GET', `/api/teams/${team3Id}/members`);
+  const other = (members.data?.members || []).find((m) => m.role !== 'owner');
+  check(!!other, '团队里有可接收所有权的成员', other?.email || JSON.stringify(members.data).slice(0, 120));
+  if (!other) throw new Error('没有可接收所有权的成员，后续断言无法进行');
+
+  const transfer = await api('POST', `/api/teams/${team3Id}/transfer`, { userId: other.id });
+  eq(transfer.status, 200, '所有者可以转让团队所有权');
+  const afterTransfer = await api('GET', `/api/teams/${team3Id}/members`);
+  const newOwner = (afterTransfer.data?.members || []).find((m) => m.id === other.id);
+  eq(newOwner?.role, 'owner', '接收方已成为所有者');
+  const oldOwnerRow = (afterTransfer.data?.members || []).find((m) => m.email === owner2Email);
+  eq(oldOwnerRow?.role, 'admin', '原所有者降为团队管理员（不会失去管理权限）');
+
+  const notOwner = await api('POST', `/api/teams/${team3Id}/transfer`, { userId: other.id });
+  check([400, 403].includes(notOwner.status), '非所有者不能再次转让', notOwner.status);
+
+  useCookie(owner2Cookie);
+  const nowAllowed = await api('DELETE', '/api/users/me', { password: owner2Pw });
+  eq(nowAllowed.status, 200, '转让后原所有者可以正常注销');
+
   head('收尾');
   await stop();
-  try { fs.rmSync(TMP_ROOT, { recursive: true, force: true }); } catch { /* */ }
 
   console.log('\n' + '─'.repeat(64));
   console.log(`  通过 ${passed} · 失败 ${failed}`);

@@ -27,6 +27,13 @@ function hasOtherMembers(teamId, userId) {
   ) || 0) > 0;
 }
 
+/** 除该用户外还有几个可用的管理员 */
+export function otherActiveAdmins(userId) {
+  return Number(scalar(
+    `SELECT COUNT(*) FROM users WHERE role='admin' AND status='active' AND id<>?`, userId
+  ) || 0);
+}
+
 /**
  * 注销前的阻断检查。返回不能注销的原因列表（为空表示可以注销）。
  * @returns {string[]}
@@ -44,6 +51,13 @@ export async function deleteAccount(user) {
   const blockers = accountDeletionBlockers(user.id);
   if (blockers.length) {
     throw httpError(400, `你还是团队「${blockers.join('、')}」的所有者且团队中还有其他成员，请先转让团队所有权再注销`);
+  }
+
+  // 唯一的可用管理员不能注销自己：用户记录虽然保留，但状态是 deleted，
+  // 而引导逻辑只在「一个用户都没有」时才创建管理员，
+  // 所以删掉最后一个管理员之后，这个实例就再也进不了系统管理了。
+  if (user.role === 'admin' && otherActiveAdmins(user.id) === 0) {
+    throw httpError(400, '你是系统唯一可用的管理员，请先创建或指定另一位管理员，再注销当前账号');
   }
 
   // 只属于该用户、没有其他成员的团队

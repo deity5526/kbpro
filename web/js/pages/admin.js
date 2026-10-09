@@ -76,12 +76,14 @@ export async function mount(container, ctx) {
 
     <div class="tabs" role="tablist">
       <button class="tab is-active" data-tab="overview" role="tab">概览</button>
+      <button class="tab" data-tab="users" role="tab">用户管理</button>
       <button class="tab" data-tab="backup" role="tab">备份与恢复</button>
       <button class="tab" data-tab="logs" role="tab">审计日志</button>
       <button class="tab" data-tab="settings" role="tab">实例设置</button>
     </div>
 
     <section class="tab-panel" data-panel="overview"></section>
+    <section class="tab-panel" data-panel="users" hidden></section>
     <section class="tab-panel" data-panel="backup" hidden></section>
     <section class="tab-panel" data-panel="logs" hidden></section>
     <section class="tab-panel" data-panel="settings" hidden></section>
@@ -90,24 +92,28 @@ export async function mount(container, ctx) {
   const offs = [];
   const activeTab = () => qs('.tab.is-active', container)?.getAttribute('data-tab') || 'overview';
 
+  const LOADERS = {
+    overview: loadOverview,
+    users: loadUsers,
+    backup: loadBackups,
+    logs: loadLogs,
+    settings: loadSettings
+  };
+
   offs.push(on(container, 'click', '[data-tab]', (e, node) => {
     const tab = node.getAttribute('data-tab');
     qsa('[data-tab]', container).forEach((n) => n.classList.toggle('is-active', n === node));
     qsa('[data-panel]', container).forEach((p) => { p.hidden = p.getAttribute('data-panel') !== tab; });
-    if (tab === 'settings') loadSettings(container, ctx);
+    if (tab !== 'overview') LOADERS[tab]?.(container, ctx);
   }));
 
   offs.push(on(container, 'click', '[data-act="refresh-tab"]', async (e, node) => {
     const tab = activeTab();
-    await withLoading(node, async () => {
-      if (tab === 'overview') await loadOverview(container, ctx);
-      else if (tab === 'backup') await loadBackups(container, ctx);
-      else if (tab === 'logs') await loadLogs(container, ctx);
-      else if (tab === 'settings') await loadSettings(container, ctx);
-    })();
+    await withLoading(node, async () => { await LOADERS[tab]?.(container, ctx); })();
   }));
 
   offs.push(...bindOverview(container, ctx));
+  offs.push(...bindUsers(container, ctx));
   offs.push(...bindBackups(container, ctx));
   offs.push(...bindLogs(container, ctx));
   offs.push(...bindSettings(container, ctx));
@@ -124,6 +130,176 @@ export function unmount() {
     try { typeof off === 'function' && off(); } catch { /* 忽略 */ }
   }
   cleanup = [];
+}
+
+/* ================================================================== 用户管理 */
+
+function userRowHtml(u) {
+  const roleBadge = u.role === 'admin'
+    ? `<span class="badge badge-success">管理员</span>`
+    : `<span class="badge">成员</span>`;
+  const statusBadge = u.status === 'disabled'
+    ? `<span class="badge badge-warn">已停用</span>`
+    : u.status === 'deleted'
+      ? `<span class="badge badge-danger">已注销</span>`
+      : `<span class="badge badge-success">正常</span>`;
+  const self = u.isSelf ? '<span class="text-xs text-muted">（我自己）</span>' : '';
+  return `<tr data-user="${esc(u.id)}">
+    <td>
+      <div style="min-width:0">
+        <div class="truncate" style="font-weight:540">${esc(u.name)} ${self}</div>
+        <div class="text-xs text-muted truncate">${esc(u.email)}</div>
+      </div>
+    </td>
+    <td>${roleBadge}</td>
+    <td>${statusBadge}</td>
+    <td class="num">${formatNumber(u.files)}</td>
+    <td class="num">${formatNumber(u.notes)}</td>
+    <td class="num">${esc(u.storageUsedText)}</td>
+    <td class="text-xs text-muted">${esc(u.lastLoginAt ? timeAgo(u.lastLoginAt) : '从未登录')}</td>
+    <td class="num" style="white-space:nowrap">
+      <button class="btn btn-sm btn-default" data-user-act="role" data-id="${esc(u.id)}" data-role="${u.role === 'admin' ? 'user' : 'admin'}"
+        ${u.isDeleted || u.isSelf ? 'disabled' : ''}>${u.role === 'admin' ? '取消管理员' : '设为管理员'}</button>
+      <button class="btn btn-sm btn-default" data-user-act="status" data-id="${esc(u.id)}" data-status="${u.status === 'active' ? 'disabled' : 'active'}"
+        ${u.isDeleted || u.isSelf ? 'disabled' : ''}>${u.status === 'active' ? '停用' : '启用'}</button>
+      <button class="btn btn-sm btn-danger" data-user-act="delete" data-id="${esc(u.id)}" data-name="${esc(u.name)}"
+        ${u.isDeleted || u.isSelf ? 'disabled' : ''}>删除</button>
+    </td>
+  </tr>`;
+}
+
+function renderUsers(panel, data, filter) {
+  const host = qs('[data-users-host]', panel);
+  if (!host) return;
+  const users = data.users || [];
+  if (!users.length) {
+    host.innerHTML = emptyState({ iconName: 'users', title: '没有匹配的用户', desc: '换个关键词或清除筛选条件试试。' });
+    return;
+  }
+  host.innerHTML = `<table class="data-table">
+    <thead><tr>
+      <th>用户</th><th>角色</th><th>状态</th><th class="num">文件</th><th class="num">笔记</th>
+      <th class="num">存储</th><th>最近登录</th><th class="num">操作</th>
+    </tr></thead>
+    <tbody>${users.map(userRowHtml).join('')}</tbody>
+  </table>`;
+  applyIcons(host);
+  const sum = qs('[data-users-summary]', panel);
+  if (sum) {
+    const s = data.summary || {};
+    sum.textContent = `共 ${s.total ?? users.length} 个账号 · 正常 ${s.active ?? '—'} · 管理员 ${s.admins ?? '—'}`
+      + (filter.q ? ` · 匹配「${filter.q}」` : '');
+  }
+}
+
+async function loadUsers(container, ctx) {
+  const panel = qs('[data-panel="users"]', container);
+  if (!panel) return;
+  if (!qs('[data-users-host]', panel)) {
+    panel.innerHTML = `<div class="card"><div class="card-pad">
+      <div class="section-head">
+        <div>
+          <div class="section-title">${icon('users')} 账号列表</div>
+          <div class="section-sub" data-users-summary>加载中…</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="search-box" style="width:220px">
+            <span class="sb-ico">${icon('search')}</span>
+            <input class="input input-sm" data-users-q placeholder="搜索昵称或邮箱…">
+          </div>
+          <select class="select input-sm" data-users-role style="width:118px">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="user">成员</option>
+          </select>
+          <select class="select input-sm" data-users-status style="width:118px">
+            <option value="">全部状态</option>
+            <option value="active">正常</option>
+            <option value="disabled">已停用</option>
+            <option value="deleted">已注销</option>
+          </select>
+        </div>
+      </div>
+      <div data-users-host>${skeleton(4)}</div>
+      <div class="field-hint" style="margin-top:10px">
+        停用账号会立即作废该用户的全部登录会话；删除账号等同于该用户自行注销，
+        其个人知识库与文件会被清理，团队所有权会移交给当前管理员。
+        为保证系统始终可管理，最后一位可用管理员不能被降级、停用或删除。
+      </div>
+    </div></div>`;
+    applyIcons(panel);
+  }
+  const filter = {
+    q: qs('[data-users-q]', panel)?.value.trim() || '',
+    role: qs('[data-users-role]', panel)?.value || '',
+    status: qs('[data-users-status]', panel)?.value || ''
+  };
+  const host = qs('[data-users-host]', panel);
+  try {
+    const data = await ctx.api.adminUsers(filter);
+    renderUsers(panel, data, filter);
+  } catch (err) {
+    if (host) host.innerHTML = emptyState({ iconName: 'alert', title: '加载失败', desc: esc(err.message) });
+  }
+}
+
+function bindUsers(container, ctx) {
+  const offs = [];
+  const panel = qs('[data-panel="users"]', container);
+
+  offs.push(on(panel, 'input', '[data-users-q]', debounce(() => loadUsers(container, ctx), 300)));
+  offs.push(on(panel, 'change', '[data-users-role]', () => loadUsers(container, ctx)));
+  offs.push(on(panel, 'change', '[data-users-status]', () => loadUsers(container, ctx)));
+
+  offs.push(on(panel, 'click', '[data-user-act="role"]', async (e, node) => {
+    const id = node.getAttribute('data-id');
+    const role = node.getAttribute('data-role');
+    try {
+      await ctx.api.adminUpdateUser(id, { role });
+      notify.success(role === 'admin' ? '已设为管理员' : '已取消管理员');
+      await loadUsers(container, ctx);
+    } catch (err) { notify.error(err.message); }
+  }));
+
+  offs.push(on(panel, 'click', '[data-user-act="status"]', async (e, node) => {
+    const id = node.getAttribute('data-id');
+    const status = node.getAttribute('data-status');
+    const label = status === 'active' ? '启用' : '停用';
+    const ok = await confirmDialog({
+      title: `${label}账号`,
+      message: status === 'active'
+        ? '启用后该用户可以重新登录。'
+        : '停用后该用户<b>立即无法登录</b>，已有的登录会话会全部作废，但数据保留。',
+      confirmText: label,
+      danger: status !== 'active'
+    });
+    if (!ok) return;
+    try {
+      await ctx.api.adminUpdateUser(id, { status });
+      notify.success(`已${label}该账号`);
+      await loadUsers(container, ctx);
+    } catch (err) { notify.error(err.message); }
+  }));
+
+  offs.push(on(panel, 'click', '[data-user-act="delete"]', async (e, node) => {
+    const id = node.getAttribute('data-id');
+    const name = node.getAttribute('data-name');
+    const ok = await confirmDialog({
+      title: '删除账号',
+      message: `将删除《${esc(name)}》的账号：其<b>个人知识库与全部文件、笔记</b>会被清理，`
+        + `所有登录会话作废，账号记录会被匿名化。<br><span class="text-muted">该操作不可恢复；其拥有的团队所有权会移交给你。</span>`,
+      confirmText: '删除账号',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      const r = await ctx.api.adminDeleteUser(id);
+      notify.success(`已删除账号（接管团队 ${r.teamsTaken || 0} 个，清理文件 ${r.files || 0} 个）`, { duration: 2600 });
+      await loadUsers(container, ctx);
+    } catch (err) { notify.error(err.message); }
+  }));
+
+  return offs;
 }
 
 /* ================================================================== 概览 */

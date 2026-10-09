@@ -17,7 +17,7 @@ const SUITES = [
   { file: 'tests/test-api.mjs', label: '后端 API 端到端', desc: '认证、权限、文件、笔记、检索、RAG、备份' },
   { file: 'tests/test-formats.mjs', label: '多格式解析与检索', desc: 'PDF/Word/Excel/PPT/文本 全链路' },
   { file: 'tests/test-ai-fallback.mjs', label: '大模型容错与安全', desc: '流中断 / 错误负载 / 参数重试 / SSRF' },
-  { file: 'tests/test-account.mjs', label: '账号注销', desc: '阻断条件 / 数据清理 / 凭据失效 / 匿名化 / 审计' }
+  { file: 'tests/test-account.mjs', label: '账号与用户管理', desc: '注销阻断 / 数据清理 / 用户管理 / 团队转让 / 匿名化 / 审计' }
 ];
 
 const EXTRA = [
